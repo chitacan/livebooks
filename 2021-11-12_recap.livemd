@@ -1,0 +1,211 @@
+<!-- vim: syntax=Markdown -->
+
+# 2021-11-12 Elixir Team Weekly Recap
+
+## fold / unfold
+
+fold 와 reduce 는 완전히 같은 동작이다. 둘을 굳이 구분해서 사용하고 싶다면, unfold 가 가능한 상황에서는 fold 를 unfold 가 불가능한 상황에서는 reduce 를 사용한다.
+그렇다면 unfold 가 가능한 fold 는 무엇이 있을까?
+
+파일의 목록을 하나의 파일로 만드는 동작 (zip, tar, giva) 은 unfold 가 가능한 동작이라 할 수 있다. 다시말해 역함수가 있는 reduce 동작은 fold / unfold 로 구분하면 좋다.
+
+Elixir 에서는 Enum 에는 reduce, List 에는 fold 란 이름으로 구분되어 있다.
+
+```elixir
+List.foldl([1, 2, 3], 0, fn x, acc -> x + acc end)
+```
+
+unfold 는 Stream 모듈에 구현되어 있다.
+
+```elixir
+Stream.unfold(10, fn
+  0 -> nil
+  n -> {n, n - 1}
+end)
+|> Enum.to_list()
+```
+
+```elixir
+:inet.gethostname()
+```
+
+## Decode giva with binary pattern match
+
+web-momenti-player 의 [resource_manager.ts 파일](https://github.com/corp-momenti/web-momenti-player/blob/ccbc39b36983af0e0bdb683627de5b1a1466a043/src/player/resource_manager.ts#L866-L922) 에 구현된 [parseActionBytes](https://github.com/corp-momenti/web-momenti-player/blob/ccbc39b36983af0e0bdb683627de5b1a1466a043/src/player/resource_manager.ts#L866-L922) 의 구현을 [Elixir 로 가져와](https://github.com/corp-momenti/momenti-elixir/blob/6505bc212940690418792c763791ed6149930c99/apps/momenti/lib/momenti/media/giva.ex) [테스트 코드까지 작성](https://github.com/corp-momenti/momenti-elixir/blob/master/apps/momenti/test/momenti/media/giva_test.exs)
+
+테스트 코드를 포함해도 라인수가 기존 ts 코드보다 훨씬 줄어들었는데, 여기에 사용된 트릭들을 연습해보자
+
+```elixir
+defmodule Giva do
+  @identifier <<170, 187, 204, 221, 221, 204, 187, 170>>
+  @image_type 0
+  @giva_file "data/bf506159-3d7b-4242-a254-a24b7b313e3c@0968E872-DBCE-43E0-BF92-B127C4D6A7EC_3_50.giva"
+
+  def read() do
+    @giva_file |> File.read!()
+  end
+
+  def identifier, do: @identifier
+
+  def decode(<<bin::binary>>) do
+    bin
+    |> Stream.unfold(fn
+      @identifier <>
+          <<frame_id::binary-size(36), @image_type, _reserved::size(8), length::size(32),
+            image_bin::binary-size(length), next::binary>> ->
+        {{frame_id, image_bin}, next}
+
+      <<>> ->
+        nil
+    end)
+    |> Enum.to_list()
+  end
+end
+```
+
+### `<<>>`
+
+https://hexdocs.pm/elixir/Kernel.SpecialForms.html#%3C%3C%3E%3E/1
+
+바이너리 (bitstring) 은 여러가지 type, option, size 로 매치할 수 있다.
+
+binary-size 는 8bit 단위이다. `<<>>` 외부에서는 `byte_size` 와 같다.
+
+size 는 1bit 단위.
+
+```elixir
+identifier = Giva.identifier()
+identifier_size = byte_size(identifier)
+<<_::binary-size(identifier_size), frame_id::binary-size(36), rest::binary>> = Giva.read()
+frame_id
+```
+
+하나의 바이너리 파일을 unfold 를 사용해 `{frameId, image_bin}` 의 목록으로 변환한다.
+
+```elixir
+Giva.read() |> Giva.decode()
+```
+
+> And the variable can be defined in the match itself (prior to its use):
+
+항목을 통해 `decode` 함수를 좀 더 간결하게 작성할 수 있다는 것을 알게되었다.
+
+*before*
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+def decode(<<bin::binary>>) do
+  bin
+  |> Stream.unfold(fn
+    @identifier <>
+        <<frame_id::binary-size(36), @image_type, _reserved::size(8), length::size(32),
+          rest::binary>> ->
+      <<image_bin::binary-size(length), next::binary>> = rest
+      {{frame_id, image_bin}, next}
+
+    <<>> ->
+      nil
+  end)
+  |> Enum.to_list()
+```
+
+*after*
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+def decode(<<bin::binary>>) do
+  bin
+  |> Stream.unfold(fn
+    @identifier <>
+        <<frame_id::binary-size(36), @image_type, _reserved::size(8), length::size(32),
+          image_bin::binary-size(length), next::binary>> ->
+      {{frame_id, image_bin}, next}
+
+    <<>> ->
+      nil
+  end)
+  |> Enum.to_list()
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+`<<>>` 안에 string 이 들어 있으면 자동으로 binary 로 expand 해준다.
+
+```elixir
+<<name_size::integer, name::binary-size(name_size), " the ", species::binary>> =
+  <<5, "Frank the Walrus">>
+
+{name, species}
+```
+
+```elixir
+<<first::integer, rest::integer-size(16)>> = <<10, 20, 30>>
+rest
+```
+
+## traverse
+
+traverse 는 기본적으로 sequence + map 의 합성이다. 따라서 traverse 를 이해하기 위해서는 sequence 를 정확하게 이해하고 있어야 한다.
+
+먼저 witchcraft 를 livebook 에 설치해보자. (단순히 `Mix.install` 을 호출해서는 설치가 되지 않는다.)
+
+```elixir
+Mix.install(
+  [
+    {:algae, "~> 1.3", override: true, app: false},
+    {:quark, "~> 2.3", override: true, app: false},
+    {:type_class, "~> 1.2", override: true, app: false},
+    {:exceptional, "~> 2.1", override: true, app: false},
+    {:operator, "~> 0.2", override: true, app: false},
+    {:witchcraft, git: "https://github.com/jechol/witchcraft.git", override: true, app: false}
+  ],
+  force: true
+)
+```
+
+```elixir
+use Witchcraft
+alias Algae.Either.Right
+alias Algae.Either.Left
+```
+
+sequence 는 `[Promise<T>, Promise<T>, Promise<T>]` 를 받아서 `Promise<[T]>` 를 반환하는 `Promise.all` 과 유사하다.
+
+```elixir
+sequence([[1]])
+```
+
+```elixir
+sequence([Right.new(10), Right.new(20), Right.new(30)])
+```
+
+```elixir
+sequence([Left.new(10), Right.new(20), Left.new(30)])
+```
+
+`Either` 의 동작은 예상한대로 였지만, `Tuple` 의 경우 왜 이렇게 동작하는지 정확하게 파악하기가 어렵다.
+
+```elixir
+sequence({Right.new(10), Right.new(20), Right.new(30)})
+```
+
+```elixir
+sequence({[1, 2]})
+```
+
+```elixir
+sequence([{1}])
+```
+
+```elixir
+sequence([{1}, {5}])
+```
+
+```elixir
+traverse([1, 2, 3], fn x -> Right.new(x * 10) end)
+```
+
+최종적으로는 [여기에 사용된](https://github.com/corp-momenti/momenti-elixir/blob/6505bc212940690418792c763791ed6149930c99/apps/momenti/lib/momenti/media/ffmpeg.ex) `async_traverse` 를 이해하고 싶은데, `async_traverse` 는 `Momenti.Control.Monad` 에 [자체적으로](https://github.com/corp-momenti/momenti-elixir/blob/6f4ef321f0b75bb47b69741bc813d5610008f505/apps/momenti/lib/momenti/control/monad.ex#L93-L96) 정의된 함수임
+따라서 나머지는 [다른 노트북](./momenti-controls.livemd#async_traverse) 에서 진행하겠음

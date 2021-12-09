@@ -1,0 +1,60 @@
+<!-- vim: syntax=Markdown -->
+
+# dbg playground
+
+## Intro
+
+Elixir 에서 프로세스, 함수를 트레이싱하는 가장 좋은 방법은 recon 모듈을 사용하는 것이다. 하지만 recon 을 사용하기 어려운 경우도 있다.
+
+* recon 을 사용하지 않으면서, git 으로 관리되는 mix project. (`Mix.install` 사용 불가)
+
+이런 경우를 대비해서, erlang 에 기본적으로 내장되어 있는 dbg 모듈의 활용방법을 익혀두면 유용할 것 같다는 생각이 들었다.
+
+https://kaiwern.com/posts/2020/11/02/debugging-with-tracing-in-elixir 포스트의 dbg 코드를 livebook 에 가져왔는데, 몆 가지 문제가 있다.
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+:dbg.tracer(:process, {fn _, 5 -> :dbg.stop_clear()
+                        msg, n -> IO.inspect(msg); n+1 end, 0})
+```
+
+위 코드로 tracer 프로세스를 실행하면, livebook 에서 flush_widgets timeout 에러가 발생한다.
+
+아무런 옵션 없이 `:dbg.tracer` 를 실행하면, 트레이스된 메시지를 확인할 수 있는 방법이 없어진다.
+
+관련해서 [livebook](vscode://GitHub.remotehub/open?url=https://github.com/livebook-dev/livebook) 의 코드를 살펴보는 것이 좋을 것 같다.
+
+```elixir
+evaluator = self()
+```
+
+```elixir
+Process.whereis(Livebook.Evaluator)
+```
+
+```elixir
+# :dbg.tracer()
+:dbg.tracer(
+  :process,
+  {fn msg, n ->
+     IO.inspect(msg)
+     n + 1
+   end, 0}
+)
+```
+
+```elixir
+:dbg.tpl(Enum, :map, [])
+:dbg.p(:all, :c)
+```
+
+```elixir
+Enum.map([1, 2, 3, 4], &(&1 + 1))
+```
+
+```elixir
+:dbg.stop_clear()
+```
+
+## Section

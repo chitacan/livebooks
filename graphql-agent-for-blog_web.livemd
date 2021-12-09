@@ -1,0 +1,148 @@
+<!-- vim: syntax=Markdown -->
+
+# Graphql Agent for blog_web
+
+## Target Node
+
+```elixir
+node_list = :net_adm.world_list([:"cmbp.chitacan.io"])
+```
+
+```elixir
+target_node =
+  node_list
+  |> Enum.find(fn node_name ->
+    node_name |> to_string |> String.split("@") |> List.first() |> String.equivalent?("blog")
+  end)
+```
+
+```elixir
+Node.ping(target_node)
+```
+
+## Agent Module
+
+```elixir
+{:module, module, binary, _} =
+  defmodule Graphql.Agent do
+    @vsn :os.system_time(:second)
+    use GenServer
+
+    def start(name \\ :agent_1) do
+      GenServer.start(__MODULE__, %{}, name: name)
+    end
+
+    def query(name, gql, variables \\ %{}) do
+      GenServer.call(name, {:query, gql, variables})
+    end
+
+    def mutate(name, gql, variables \\ %{}) do
+      GenServer.call(name, {:mutate, gql, variables})
+    end
+
+    def subscribe(name, gql, variables \\ %{}) do
+      GenServer.call(name, {:subscribe, gql, variables})
+    end
+
+    # callbacks
+    def init(args) do
+      {:ok, args}
+    end
+
+    def handle_call({op, gql, variables}, _from, state) when op in [:query, :mutate] do
+      result = Absinthe.run(gql, BlogWeb.Schema, variables: variables)
+      {:reply, result, state}
+    end
+
+    def handle_call({:subscribe, gql, variables}, from, state) do
+      {:ok, %{"subscribed" => topic}} =
+        Absinthe.run(gql, BlogWeb.Schema,
+          variables: variables,
+          context: %{pubsub: BlogWeb.Endpoint}
+        )
+
+      BlogWeb.Endpoint.subscribe(topic)
+      {pid, _} = from
+      {:reply, topic, Map.merge(state, %{topic => pid})}
+    end
+
+    def handle_info(
+          %{event: "subscription:data", payload: %{result: %{data: data}}, topic: topic},
+          state
+        ) do
+      case Map.get(state, topic) do
+        pid when is_pid(pid) -> send(pid, data)
+        nil -> nil
+      end
+
+      {:noreply, state}
+    end
+
+    def code_change(_old, _state, _) do
+      {:ok, %{}}
+    end
+  end
+```
+
+## Load Module on blog_web
+
+```elixir
+:rpc.call(target_node, :code, :purge, [module])
+:rpc.call(target_node, :code, :load_binary, [module, '/graphql_agent.ex', binary])
+```
+
+```elixir
+{:ok, pid} = :rpc.call(target_node, Graphql.Agent, :start, [])
+```
+
+```elixir
+pid = :rpc.call(target_node, Process, :whereis, [:agent_1])
+```
+
+```elixir
+gql = """
+query {
+  host
+}
+"""
+
+Graphql.Agent.query(pid, gql)
+```
+
+```elixir
+gql = """
+query {
+  posts {
+    id
+    title
+    body
+  }
+}
+"""
+
+Graphql.Agent.query(pid, gql)
+```
+
+```elixir
+gql = """
+subscription {
+  postUpdated {
+    id
+    title
+    body
+  }
+}
+"""
+
+Graphql.Agent.subscribe(pid, gql)
+```
+
+```elixir
+:sys.get_state(pid)
+```
+
+## kill agent
+
+```elixir
+Process.exit(pid, :kill)
+```

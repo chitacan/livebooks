@@ -1,0 +1,152 @@
+<!-- vim: syntax=Markdown -->
+
+# Graphql Agent for momenti_web
+
+## Target Node
+
+```elixir
+world_list = :net_adm.world_list([:"127.0.0.1"])
+```
+
+```elixir
+:net_adm.world()
+```
+
+```elixir
+target_node =
+  world_list
+  |> Enum.filter(fn node ->
+    node |> to_string |> String.split("@") |> List.first() == "api"
+  end)
+  |> List.first()
+```
+
+## Module
+
+아래의 코드가 가능하다. 라이브북 노드에는 없는 `Algae.Either.Right` 를 `target_node` 로 부터 로드해와서 `Graphql.Agent` 를 컴파일하는데 사용할 수 있다.
+`Mix.install([:algae])` 가 계속 실패해서 실망했었는데, 이런 미친 방밥이 가능하다니 😎
+
+```elixir
+{module, binary, filename} = :rpc.call(target_node, :code, :get_object_code, [Algae.Either.Right])
+:code.load_binary(module, filename, binary)
+```
+
+```elixir
+{:module, module_name, module_binary, _opt} =
+  defmodule Graphql.Agent do
+    use GenServer
+
+    alias MomentiEcto.V4.Accounts
+
+    def start(args, name \\ :agent_1) do
+      GenServer.start(__MODULE__, args, name: name)
+    end
+
+    def query(name, query, variables \\ %{}) do
+      GenServer.call(name, {:query, query, variables})
+    end
+
+    def mutate(name, query, variables \\ %{}) do
+      GenServer.call(name, {:mutate, query, variables})
+    end
+
+    def subscribe(name, query, variables \\ %{}) do
+      GenServer.call(name, {:subscribe, query, variables})
+    end
+
+    # callbacks
+    def init({client_pid, access_token}) do
+      {:ok, %{client_pid: client_pid, access_token: access_token, valid: false, context: nil},
+       {:continue, :validate_token}}
+    end
+
+    def handle_continue(:validate_token, %{access_token: access_token} = state) do
+      case Accounts.authenticate(:partner, access_token) do
+        %Algae.Either.Right{right: partner} ->
+          {:noreply, %{state | valid: true, context: %{:partner => partner}}}
+
+        _ ->
+          {:noreply, %{state | valid: false}}
+      end
+    end
+
+    def handle_call({op, query, variables}, _from, %{context: context} = state)
+        when op in [:query, :mutate] do
+      result = Absinthe.run(query, MomentiWeb.W4.Schema, context: context, variables: variables)
+      {:reply, result, state}
+    end
+
+    def handle_call({:subscribe, query, variables}, _from, %{context: context} = state) do
+      topic = Absinthe.run(query, MomentiWeb.W4.Schema, context: context, variables: variables)
+      {:reply, topic, state}
+    end
+
+    # handle subscription message
+  end
+```
+
+## Load Module on remote node
+
+livebook 의 [erl_dist.ex](https://github.com/livebook-dev/livebook/blob/64037e0cf427081f800dec13439239019704585f/lib/livebook/runtime/erl_dist.ex#L56-L61) 에 사용된 코드를 활용한다.
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+  defp load_required_modules(node) do
+    for module <- @required_modules do
+      {_module, binary, filename} = :code.get_object_code(module)
+      {:module, _} = :rpc.call(node, :code, :load_binary, [module, filename, binary])
+    end
+  end
+```
+
+다만, 나는 livebook 에 선언된 모듈을 로드하기 때문에 `:code.get_object_code` 가 필요없고,
+`load_binary` 에서 두번째 인자 `filename` 은 무의미하기 때문에 타입만 맞춰 호출한다.
+
+```elixir
+:rpc.call(target_node, :code, :load_binary, [module_name, '/graphql_agent.ex', module_binary])
+```
+
+```elixir
+token =
+  "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IkhKazlrTFpCdWpXMTl2V3JLckttdSJ9.eyJodHRwczovL21vbWVudGkudHYvIjp7Im9yZ2FuaXphdGlvbiI6eyJkaXNwbGF5X25hbWUiOiJNb21lbnRpIiwiaWQiOiJvcmdfdEhWMDZEZVVrU3BOc0FqVCIsIm5hbWUiOiJtb21lbnRpIn0sInJvbGVzIjpbImFkbWluIiwicGFydG5lciIsImNyZWF0b3IiLCJhbmFseXN0Il0sInVzZXIiOnsiZW1haWwiOiJicmV0QG1vbWVudGkudHYiLCJuaWNrbmFtZSI6ImJyZXQifX0sImlzcyI6Imh0dHBzOi8vbW9tZW50aS1kZXYudXMuYXV0aDAuY29tLyIsInN1YiI6Imdvb2dsZS1vYXV0aDJ8MTAxNDM0MzE0MjI0NDUzMDQyNzEwIiwiYXVkIjpbImh0dHBzOi8vbWFrZXIuYXBpIiwiaHR0cHM6Ly9tb21lbnRpLWRldi51cy5hdXRoMC5jb20vdXNlcmluZm8iXSwiaWF0IjoxNjI4NjcwOTU2LCJleHAiOjE2Mjg3NTczNTYsImF6cCI6InduN0o2Z21JYkZIbGpmczR6emRmWW5Mc3hsNnBVb1FVIiwic2NvcGUiOiJvcGVuaWQgcHJvZmlsZSBlbWFpbCIsIm9yZ19pZCI6Im9yZ190SFYwNkRlVWtTcE5zQWpUIn0.qsZ-iQcE2VCcqNZIM448ubqCXoIstL_YYKlWZVJCRk5oRU3IYcznbX282epvSu2q_9sFBLN7BxdjPyh89-HrxxE4cAgJKKo6tvqNA-A1mzav8u2oHQGnjxFpAPA92o3Wrtvx7lkJeKxCrhk6Ny38QK0cB0jkAS6yc-OQqJSZk0xQTSXF2SqjZavlV5nb67yLqJH8Gh5m5HouirA6mPpjnFFJWkvygbz_DXWo4Dp21YP_3eBuSTPjigbX-AAMGtIW4n1CtXCwSyJloHv0reorpJgQAOG8yRwNSTjeTvPQ1wTVIfgUdS840sipBIrHVEwbAXzVNrRKXR14iwVT3IPpnQ"
+```
+
+```elixir
+{:ok, pid} = :rpc.call(target_node, module_name, :start, [{"pid", token}, :agent_1])
+```
+
+```elixir
+:rpc.call(target_node, :sys, :get_state, [:agent_1])
+```
+
+## run graphql
+
+```elixir
+pid
+```
+
+```elixir
+query = """
+query {
+  me {
+    partner {
+      roles
+    }
+  }
+}
+"""
+
+Graphql.Agent.query(pid, query)
+```
+
+```elixir
+
+```
+
+## Kill agent
+
+```elixir
+:rpc.call(target_node, Process, :whereis, [:agent_1])
+|> Process.exit(:kill)
+```

@@ -1,0 +1,254 @@
+<!-- vim: syntax=Markdown -->
+
+# momenti controls
+
+## setup
+
+`Momenti.Control` 에 있는 모듈들 & [Witchcraft](https://hexdocs.pm/witchcraft/1.0.3/readme.html) 기능들을 학습해보기 위한 노트북
+
+[momenti-elixir](https://github.dev/corp-momenti/momenti-elixir) `apps/momenti` 앱을 다음과 같이 실행합니다.
+
+```
+$ iex --name momenti@cmmn.chitacan.io --cookie hello -S mix
+```
+
+LiveBook 에서는 Runtime Settings ➡️ Attached Node 를 선택합니다.
+
+```elixir
+use Momenti.Control
+```
+
+## Basic Types
+
+```elixir
+Right.new()
+```
+
+```elixir
+Left.new()
+```
+
+```elixir
+Error.new(:raw, :reason, :detail)
+```
+
+```elixir
+Monad.left_error(:error)
+```
+
+## chain
+
+```elixir
+zeroTrue = fn val ->
+  if val == 0 do
+    Right.new(:ok)
+  else
+    Left.new(:err)
+  end
+end
+```
+
+```elixir
+chain do
+  # :ok
+  :ok <- zeroTrue.(0)
+  # :err
+  zeroTrue.(1)
+  # skipped
+  zeroTrue.(0)
+end
+```
+
+## Monad.either
+
+```elixir
+random = fn ->
+  case Enum.random(0..3) do
+    0 -> Right.new(0)
+    1 -> Left.new(1)
+    2 -> Error.new(:raw, :reason, :detail)
+    3 -> 3
+  end
+end
+```
+
+```elixir
+random.() |> Monad.either()
+```
+
+## monad
+
+```elixir
+monad [] do
+  return(1)
+end
+```
+
+```elixir
+monad [] do
+  :ok <- zeroTrue.(0)
+  # :err
+  zeroTrue.(1)
+  # skipped
+  zeroTrue.(0)
+end
+```
+
+## Algae.Reader
+
+https://hexdocs.pm/algae/Algae.Reader.html
+
+```elixir
+correct =
+  monad %Reader{} do
+    count <- Reader.ask(&Map.get(&1, :count))
+    bindings <- Reader.ask()
+    return(count == map_size(bindings))
+  end
+```
+
+```elixir
+correct |> Reader.run(%{count: 3})
+```
+
+```elixir
+correct |> Reader.run(%{count: 3, a: 1, b: 2})
+```
+
+## defr
+
+https://github.com/trevorite/defr
+
+```elixir
+defmodule Target do
+  use Defr
+
+  import Enum, only: [at: 2]
+
+  defr top(list) do
+    list |> List.flatten() |> inject() |> middle() |> run()
+  end
+
+  defr middle(list) do
+    list |> bottom() |> inject() |> run()
+  end
+
+  defrp bottom(list) do
+    %{pos: pos} <- ask()
+    list |> at(pos) |> inject()
+  end
+end
+```
+
+```elixir
+Target.middle([10, 2, 3]) |> Reader.run(%{pos: 2})
+```
+
+`middle/1` 에서 `bottom/1` 이 `inject` 되었기 때문에, `Reader.run` 에서 다른 함수(`replaced`)로 대체할 수 있다.
+
+`pos` 의 값은 앞선 코드와 같이 2 이기 때문에, 결과는 3 (`[10,2,3] |> Enum.at(2)`) 이 나와야 한다.
+
+하지만, `bottom/1` 이 `replaced` 로 대체되어 실행되기 때문에 결과가 다르다.
+
+```elixir
+replaced = fn list ->
+  monad %Reader{} do
+    return(List.first(list))
+  end
+end
+
+Target.middle([10, 2, 3])
+|> Reader.run(%{
+  :pos => 2,
+  # middle 에서 사용되는 bottom 을 변경할 수 있다!!
+  &Target.bottom/1 => replaced
+})
+```
+
+```elixir
+env = %{}
+[1, 2, 3] |> Map.get(env, &Enum.at/2, &List.first/2).(1)
+```
+
+## ~> operator
+
+alias for [Functor.lift/2](https://hexdocs.pm/witchcraft/1.0.3/Witchcraft.Functor.html#lift/2)
+
+`%Right{}` 로 감싸진 값에 [함수를 적용할 수 있다.](https://adit.io/posts/2013-04-17-functors,_applicatives,_and_monads_in_pictures.html)
+
+```elixir
+Right.new(10) ~> fn x -> x + 10 end ~> fn x -> x + 20 end
+```
+
+```elixir
+Witchcraft.Functor.lift(Right.new(10), fn x -> x * 2 end)
+```
+
+```elixir
+[1, 2, 3] ~> fn x -> x + 10 end ~> fn x -> x + 20 end
+```
+
+```elixir
+Left.new(:error) ~> fn x -> x + 20 end ~> fn x -> x + 10 end
+```
+
+```elixir
+Right.new([10, 20, 30]) ~> (&Enum.map(&1, fn x -> x + 10 end))
+```
+
+## operator
+
+alias for [chain/2](https://hexdocs.pm/witchcraft/1.0.3/Witchcraft.Chain.html?#chain/2) (looks like `flatmap`)
+
+`%Right{}` 로 감싸진 값에 `%Right{}` 를 리턴하는 함수를 적용할 수 있다.
+
+```elixir
+Right.new(10) >>> fn x -> Right.new(x + 90) end
+```
+
+```elixir
+[10, 20, 30] >>> fn x -> [x * 10] end
+```
+
+```elixir
+Right.new(10) >>> fn _x -> Left.new(:error) end
+```
+
+## async_traverse
+
+`async_traverse` 는 [async_map 이후에](https://github.com/corp-momenti/momenti-elixir/blob/6f4ef321f0b75bb47b69741bc813d5610008f505/apps/momenti/lib/momenti/control/control.ex#L28-L41) [traverse 를 실행하는 함수다.](https://github.com/corp-momenti/momenti-elixir/blob/6f4ef321f0b75bb47b69741bc813d5610008f505/apps/momenti/lib/momenti/control/monad.ex#L77-L80)
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+def async_map(enumerable, func, max_concurrency \\ nil) do
+  max_concurrency = max_concurrency || :erlang.system_info(:schedulers) * 16
+  chunk_size = div(Enum.count(enumerable) - 1, max_concurrency) + 1
+
+  enumerable
+  |> Enum.chunk_every(chunk_size)
+  |> Enum.map(fn chunks ->
+    Task.async(fn ->
+      chunks |> Enum.map(func)
+    end)
+  end)
+  |> Task.await_many(:infinity)
+  |> Enum.flat_map(& &1)
+end
+```
+
+enumerable 을 chunk 단위로 나누고, 별도의 `Task` 프로세스에서 effect 함수를 실행하는 구조
+
+2번째 인자에는 `Algae.Either` 를 리턴해도 된다.
+
+```elixir
+Monad.async_traverse([1, 2, 3], fn x -> Right.new(x * 100) end)
+```
+
+```elixir
+Monad.async_traverse([1, 2, 3], fn x ->
+  if x == 2, do: Left.new(:error), else: Right.new(x * 100)
+end)
+```
+
+async_traverse 로 생성된 Task 를 트레이스 할 수 있을까?

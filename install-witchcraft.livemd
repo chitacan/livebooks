@@ -1,0 +1,38 @@
+<!-- vim: syntax=Markdown -->
+
+# Install witchcraft
+
+## setup
+
+```elixir
+Mix.install(
+  [
+    {:witchcraft, git: "https://github.com/witchcrafters/witchcraft.git", override: true},
+    {:algae, "~> 1.3"}
+  ]
+  # force: true
+)
+```
+
+```elixir
+use Witchcraft
+alias Algae.Either.{Right, Left}
+```
+
+```elixir
+chain do
+  [1]
+end
+```
+
+```elixir
+chain do
+  [1]
+end
+```
+
+```elixir
+monad [] do
+  Left.new(10)
+end
+```
