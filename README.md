@@ -1,6 +1,6 @@
 # livebooks 📚
 
-https://livebook.chitacan.io/
+https://livebook.cmmn.chitacan.io/
 
 https://livebook.dev/
 
