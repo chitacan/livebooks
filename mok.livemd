@@ -1,0 +1,40 @@
+# mok
+
+## setup
+
+```elixir
+Mix.install([
+  {:mok, git: "https://github.com/jechol/mok", ref: "cc1159e"}
+])
+```
+
+```elixir
+defmodule Target do
+  require Mok
+
+  def call(mocks) do
+    # 1
+    a = [1, 2, 3] |> List.first() |> Mok.inject(mocks, "unmatched")
+    # if mocks contains %{{&List.first/1, "matched"} => 10} will be 10
+    b = [1, 2, 3] |> List.first() |> Mok.inject(mocks, "matched")
+    # 1
+    c = [1, 2, 3] |> List.first() |> Mok.inject(mocks, nil)
+    # 100
+    d = [1, 2, 3] |> List.first() |> Mok.inject(mocks)
+
+    a + b + c + d
+  end
+end
+```
+
+```elixir
+Target.call(%{})
+```
+
+```elixir
+Mok.mock(%{
+  {&List.first/1, "matched"} => 10,
+  {&List.first/1, nil} => 10
+})
+|> Target.call()
+```

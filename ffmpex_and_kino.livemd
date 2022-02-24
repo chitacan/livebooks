@@ -1,0 +1,126 @@
+# ffmpex & kino
+
+## setup
+
+```elixir
+Mix.install([
+  {:kino, "~> 0.5.2"},
+  {:ffmpex, "~> 0.10.0"}
+])
+```
+
+```elixir
+video = "https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4"
+```
+
+```elixir
+import FFmpex
+use FFmpex.Options
+```
+
+```elixir
+video_info =
+  FFprobe.streams(video)
+  |> then(fn {:ok, streams} -> streams end)
+  |> Enum.at(0)
+```
+
+```elixir
+video_duration = video_info |> Map.get("duration") |> Integer.parse() |> elem(0)
+```
+
+```elixir
+video_frames = video_info |> Map.get("nb_frames") |> Integer.parse() |> elem(0)
+```
+
+```elixir
+defmodule Frames do
+  @soi <<255, 216>>
+  @video "https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4"
+
+  def fetch(time, frames) do
+    FFmpex.new_command()
+    |> add_input_file(@video)
+    |> add_file_option(option_ss(time))
+    |> to_stdout()
+    |> add_stream_specifier(stream_type: :video)
+    |> add_stream_option(option_frames(frames))
+    |> add_stream_option(option_c("mjpeg"))
+    |> add_file_option(option_f("image2pipe"))
+    |> execute()
+    |> then(fn
+      {:ok, image} ->
+        case frames do
+          1 ->
+            {:ok, [image]}
+
+          _ ->
+            images =
+              image
+              |> :binary.split(@soi, [:global, :trim_all])
+              |> Enum.map(&(@soi <> &1))
+
+            {:ok, images}
+        end
+
+      {:error, err} ->
+        err
+    end)
+  end
+end
+```
+
+<!-- livebook:{"branch_parent_index":0} -->
+
+## fetch frames
+
+```elixir
+stat_widget = Kino.Frame.new()
+```
+
+```elixir
+frame_widget = Kino.Frame.new()
+```
+
+```elixir
+form =
+  Kino.Control.form(
+    [
+      time: Kino.Input.range("Time", max: video_duration),
+      frames: Kino.Input.number("Frames", default: 1)
+    ],
+    submit: "Fetch"
+  )
+```
+
+```elixir
+[Kino.Control.interval(30), form]
+|> Kino.Control.stream()
+|> Enum.reduce(%{images: [], rendered_frame: -1}, fn
+  %{type: :submit, data: %{time: time, frames: frames}}, _ ->
+    {time, {:ok, images}} = :timer.tc(&Frames.fetch/2, [time, frames])
+    Kino.Frame.render(frame_widget, Kino.Image.new(images |> Enum.at(0), "image/jpeg"))
+
+    pretty_time = Float.floor(time / 1_000_000, 1) |> Kernel.to_string()
+    Kino.Frame.append(stat_widget, "Fetch #{frames} frames in #{pretty_time}s")
+    %{images: images, rendered_frame: 0}
+
+  %{type: :interval, iteration: _}, %{images: [], rendered_frame: _} = state ->
+    state
+
+  %{type: :interval, iteration: _}, %{images: [_], rendered_frame: 0} = state ->
+    state
+
+  %{type: :interval, iteration: _}, %{images: images, rendered_frame: rendered_frame} = state ->
+    max = length(images)
+
+    next_frame =
+      case rendered_frame + 1 do
+        ^max -> 0
+        frame -> frame
+      end
+
+    Kino.Frame.render(frame_widget, Kino.Image.new(images |> Enum.at(next_frame), "image/jpeg"))
+    %{state | rendered_frame: next_frame}
+end)
+```

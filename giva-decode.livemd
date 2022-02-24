@@ -1,0 +1,78 @@
+# Giva Decode
+
+## setup
+
+```elixir
+Mix.install([
+  {:kino, "~> 0.4.1"}
+])
+```
+
+## Giva module
+
+실제 서버에서 사용된 코드는 [여기서](https://github.com/corp-momenti/momenti-elixir/blob/master/apps/momenti/lib/momenti/media/giva.ex) 확인할 수 있습니다.
+
+```elixir
+defmodule Giva do
+  @marker <<170, 187, 204, 221, 221, 204, 187, 170>>
+  @giva_file "data/bf506159-3d7b-4242-a254-a24b7b313e3c@0968E872-DBCE-43E0-BF92-B127C4D6A7EC_3_50.giva"
+
+  defmodule Frame do
+    defstruct [:id, :index, :image_bin]
+  end
+
+  def decode(<<bin::binary>>) do
+    bin
+    |> Stream.unfold(fn
+      <<@marker::binary, frame_id::binary-size(36), frame_index::size(16), length::size(32),
+        image_bin::binary-size(length), next::binary>> ->
+        {%Frame{id: frame_id, index: frame_index, image_bin: image_bin}, next}
+
+      <<>> ->
+        nil
+    end)
+    |> Enum.to_list()
+  end
+
+  def read() do
+    @giva_file |> File.read!()
+  end
+
+  def show(%Frame{image_bin: image_bin}) do
+    Kino.Image.new(image_bin, "image/jpeg")
+  end
+
+  def marker, do: @marker
+end
+```
+
+`Giva.read/0` 함수를 호출하면, `bf506159-3d7b-4242-a254-a24b7b313e3c@0968E872-DBCE-43E0-BF92-B127C4D6A7EC_3_50.giva` 파일을 읽어서 바이너리로 리턴해줍니다.
+
+```elixir
+Giva.read()
+```
+
+`Giva.read/0` 의 결과를 `Giva.decode/1` 로 파이프해서 `bf506159-3d7b-4242-a254-a24b7b313e3c@0968E872-DBCE-43E0-BF92-B127C4D6A7EC_3_50.giva` 파일을 디코드 할 수 있습니다.
+
+```elixir
+frames = Giva.read() |> Giva.decode()
+```
+
+```elixir
+Enum.at(frames, 0).image_bin |> byte_size() |> div(1024)
+```
+
+`Giva.show/1` 함수를 사용해, 프레임의 이미지를 확인할 수 있습니다. 😎
+
+```elixir
+Enum.at(frames, 0) |> Giva.show()
+```
+
+```elixir
+max = length(frames)
+
+Kino.animate(300, 0, fn i ->
+  md = Enum.at(frames, rem(i, max)) |> Giva.show()
+  {:cont, md, i + 1}
+end)
+```

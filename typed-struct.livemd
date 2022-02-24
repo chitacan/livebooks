@@ -1,0 +1,167 @@
+# Typed Struct
+
+## Setup
+
+```elixir
+Mix.install([:ecto, :typed_struct, :typed_struct_ecto_changeset])
+```
+
+## Pure Struct
+
+[struct 와 changset 이 연결된 PR](https://github.com/corp-momenti/momenti-elixir/pull/1114) 을 진행하다보니 struct 를 좀 더 쉽게 선언할 수 있는 방식에 관심이 가기 시작했다.
+
+Cloud Studio 에서는 nested 된 struct 구조를 만들고 조회하는 방식으로 운영해야 하기 때문에, struct 를 효율적으로 만들고 관리할 수 있다면 아주 도움이 되기 때문.
+
+우선 이전에 PR 에 제안했던 모델을 살펴보자.
+
+```elixir
+defmodule Model do
+  import Ecto.Changeset
+
+  defstruct name: nil, flip: false, crop: false, background_frame: 1000
+
+  @types %{name: :string, flip: :boolean, crop: :boolean, background_frame: :integer}
+
+  def changeset(%__MODULE__{} = model, attrs \\ %{}) do
+    {model, @types}
+    |> cast(attrs, [:name, :flip, :crop, :background_frame])
+    |> validate_required([:name])
+    |> validate_length(:name, min: 3, max: 100)
+  end
+end
+```
+
+```elixir
+Model.changeset(%Model{name: "hello"})
+```
+
+```elixir
+Model.changeset(%Model{name: "hello"}, %{name: nil})
+```
+
+```elixir
+Model.changeset(%Model{name: "hello"}, %{name: 1000})
+```
+
+몇가지 변경할 부분을 정리해보자
+
+* boolean 타입에는 `?` suffix 추가
+* `changeset/2` 에서 사용되는 `@types`
+
+## typed_struct
+
+```elixir
+defmodule TypedModel do
+  use TypedStruct
+
+  typedstruct do
+    field(:name, String.t(), enforce: true)
+    field(:flip?, boolean(), default: false)
+    field(:crop?, boolean(), default: false)
+    field(:background_frame, non_neg_integer(), default: 1000)
+  end
+end
+```
+
+```elixir
+%TypedModel{name: "hello", crop?: true}
+```
+
+```elixir
+%TypedModel{name: 1000}
+```
+
+```elixir
+TypedModel.__struct__() |> Map.from_struct() |> Map.keys()
+```
+
+## typed_struct & changeset
+
+typed_struct 를 schemaless changeset 처럼 사용할 수 있도록 도와주는 typed_struct_ecto_changeset 을 추가해보자
+
+```elixir
+defmodule TypedModel2 do
+  use TypedStruct
+  import Ecto.Changeset
+
+  typedstruct do
+    plugin(TypedStructEctoChangeset)
+
+    field(:name, String.t(), enforce: true)
+    field(:flip?, boolean(), default: false)
+    field(:crop?, boolean(), default: false)
+    field(:background_frame, non_neg_integer(), default: 1000)
+  end
+
+  def changeset(%__MODULE__{} = model, attrs \\ %{}) do
+    model
+    |> cast(attrs, [:name, :flip?, :crop?, :background_frame])
+    |> validate_required([:name])
+    |> validate_length(:name, min: 3, max: 100)
+  end
+end
+```
+
+```elixir
+TypedModel2.changeset(%TypedModel2{name: nil}, %{name: "hello", crop?: false})
+```
+
+## Nested
+
+nested 된 모듈도 제대로 동작할까?
+
+```elixir
+defmodule Children do
+  use TypedStruct
+  import Ecto.Changeset
+
+  typedstruct do
+    plugin(TypedStructEctoChangeset)
+
+    field(:name, String.t(), enforce: true)
+    field(:value, non_neg_integer(), default: 1000)
+  end
+
+  def changeset(%__MODULE__{} = model, attrs \\ %{}) do
+    model
+    |> cast(attrs, [:name, :value])
+    |> validate_required([:name])
+    |> validate_length(:name, min: 3, max: 100)
+  end
+end
+```
+
+```elixir
+defmodule Parent do
+  use TypedStruct
+  import Ecto.Changeset
+
+  typedstruct do
+    plugin(TypedStructEctoChangeset)
+
+    field(:name, String.t(), enforce: true)
+    field(:children, Children.t(), default: %Children{name: "wow"})
+  end
+
+  def changeset(%__MODULE__{} = model, attrs \\ %{}) do
+    model
+    |> cast(attrs, [:name, :value])
+    |> validate_required([:name])
+    |> validate_length(:name, min: 3, max: 100)
+  end
+end
+```
+
+```elixir
+Parent.changeset(%Parent{name: ""}, %{})
+```
+
+바로 되지는 않는다. 뭔가 association 을 설정해 줘야 하는 듯하다.
+
+## Conclusion
+
+typed_struct 는 pure struct 에서 changeset 을 활용할 때, 별도의 타입선언을 생략해주는 것 외에는 큰 장점은 없어 보인다.
+
+struct 를 타입과 같이 깔끔하게 선언하고 싶을때 사용하면 좋을 것 같다.
+
+[hello](./momenti-controls.livemd)

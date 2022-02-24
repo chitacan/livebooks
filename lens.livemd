@@ -1,0 +1,104 @@
+# Lens
+
+## Setup
+
+https://github.com/obrok/lens
+
+```elixir
+Mix.install([{:lens, "~> 1.0.0"}])
+```
+
+## Examples
+
+```elixir
+data = %{
+  main_widget: %{
+    size: 200.5,
+    subwidgets: [%{size: 120, subwidgets: [%{size: 200, subwidgets: []}]}]
+  },
+  other_widgets: [
+    %{size: 16.5, subwidgets: [%{size: 120, subwidgets: []}]},
+    %{size: 160.5, subwidgets: []},
+    %{size: 121.9, subwidgets: []}
+  ]
+}
+```
+
+```elixir
+lens =
+  Lens.both(
+    Lens.key(:main_widget),
+    Lens.key(:other_widgets) |> Lens.all()
+  )
+  |> Lens.seq_both(Lens.recur(Lens.key(:subwidgets) |> Lens.all()))
+  |> Lens.key(:size)
+  |> Lens.filter(&(&1 > 100))
+```
+
+```elixir
+Lens.to_list(lens, data)
+```
+
+```elixir
+Lens.map(lens, data, &round/1)
+```
+
+```elixir
+Lens.key(:other_widgets) |> Lens.all() |> Lens.key(:size) |> Lens.to_list(data)
+```
+
+## Kernel functions for nested structure
+
+앗, nested structure 를 편하게 다루는 코드는 외부 라이브러리만 있는줄 알았는데, nested structure 를 BIF 가 있었다.
+
+* `Kernel.get_and_update_in`
+* `Kernel.get_in`
+* `Kernel.pop_in`
+* `Kernel.put_in`
+* `Kernel.update_in`
+* `Access.all`
+* `Access.key`
+
+[momenti-elixir 프로젝트에서 이미 사용된 적이 있다.](https://sourcegraph.com/search?q=context:%40chitacan+lang:Elixir+%28get_and_updated_in+OR+get_in+OR+pop_in+OR+put_in+OR+update_in%29&patternType=literal)
+
+lens 는 accessor 들을 array 가 아닌, 함수들을 합성해서 생성한다.
+
+> _Elixir’s get_in/update_in on steroids._ - https://yapee.svbtle.com/nested-data-structures-with-lens
+
+```elixir
+data |> get_in([:main_widget, :size])
+```
+
+```elixir
+data |> get_and_update_in([:main_widget, :size], &{&1, &1 * 2})
+```
+
+```elixir
+data |> get_in([Access.key(:other_widgets)])
+```
+
+`Access.all`, `Access.key/1` 를 조합해서 array of struct 접근도 가능하다.
+
+```elixir
+get_in(data, [Access.key(:other_widgets), Access.all(), Access.key(:size)])
+```
+
+## Practice
+
+```elixir
+Lens.all() |> Lens.key(:val) |> Lens.to_list([%{val: 10}, %{val: 20}, %{val: 30}])
+```
+
+```elixir
+import Integer
+
+Lens.all() |> Lens.filter(&is_odd/1) |> Lens.to_list(1..10)
+```
+
+```elixir
+Lens.key(:a) |> Lens.key(:b) |> Lens.one!(%{a: %{b: 20}})
+```
+
+```elixir
+Lens.seq(Lens.key(:a), Lens.key(:b)) |> Lens.one!(%{a: %{b: 20}})
+```

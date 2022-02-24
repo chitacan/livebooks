@@ -1,0 +1,81 @@
+# reather
+
+## setup
+
+```elixir
+Mix.install([
+  {:reather, git: "https://github.com/jechol/reather.git", ref: "469477e"}
+])
+```
+
+## example
+
+```elixir
+defmodule Target do
+  use Reather
+
+  defmodule Impure do
+    reather read("invalid") do
+      Left.new(:enoent)
+    end
+
+    reather read("valid") do
+      Right.new(99)
+    end
+  end
+
+  reather read_and_multiply(filename) do
+    # `Reather.run` 으로 전달한 env 에 함수가 있으면 inject
+    input <- Impure.read(filename) |> Reather.inject()
+
+    multiply(input)
+  end
+
+  reatherp multiply(input) do
+    %{number: number} <- Reather.ask()
+
+    Right.new(input * number)
+  end
+
+  def mock, do: Reather.mock(%{&Target.Impure.read/1 => Right.new(77)})
+end
+```
+
+private 함수인 `multiply` 에서 사용될 값을 `Reather.run` 을 통해 넣어줄 수 있다. (like [Algae.Reader](https://hexdocs.pm/algae/Algae.Reader.html))
+
+```elixir
+Target.read_and_multiply("valid") |> Reather.run(%{number: 10})
+```
+
+`Reather.run` 에 function capture 와 리턴값을 넣어두면, 함수를 쉽게 mocking 할 수 있다. (like [definject](https://github.com/jechol/definject))
+
+```elixir
+Target.read_and_multiply("valid") |> Reather.run(%{number: 10} |> Map.merge(Target.mock()))
+```
+
+## defr vs reather
+
+**defr**
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+defr get_moment_model_info(_, %{input: %{project_id: project_id}}, _) do
+  monad %Right{} do
+    moment_model_info <- ContentLogic.get_moment_model_info(project_id) |> run(%{})
+
+    return %{moment_model_info: moment_model_info} |> ContentView.render()
+  end
+end
+```
+
+**reather**
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+reather get_moment_model_info(_, %{input: %{project_id: project_id}}, _) do
+  moment_model_info <- ContentLogic.get_moment_model_info(project_id)
+  %{moment_model_info: moment_model_info} |> ContentView.render()
+end
+```

@@ -1,0 +1,420 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# ffmpex
+
+## setup
+
+```elixir
+Mix.install([
+  {:ffmpex, "~> 0.10.0"},
+  {:kino, "~> 0.5.2"}
+])
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+:ok
+```
+
+### Target
+
+```
+ffmpeg -y -ss 10 -i "https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4" -frames:v 20 aespa_%4d.png
+```
+
+2560 × 1440 해상도, 568 Mb, 3:40 길이의 영상에 대해서
+
+* cloudstorage 에 저장된 비디오 파일의 프레임을 decode 해서 파일로 저장하기
+* cloudstorage 에 저장된 비디오 파일의 프레임을 stdout 으로 출력하기 (➡️ `kino`)
+
+```elixir
+FFprobe.streams("https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4")
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:ok,
+ [
+   %{
+     "pix_fmt" => "yuv420p",
+     "bit_rate" => "20552330",
+     "disposition" => %{
+       "attached_pic" => 0,
+       "clean_effects" => 0,
+       "comment" => 0,
+       "default" => 1,
+       "dub" => 0,
+       "forced" => 0,
+       "hearing_impaired" => 0,
+       "karaoke" => 0,
+       "lyrics" => 0,
+       "original" => 0,
+       "timed_thumbnails" => 0,
+       "visual_impaired" => 0
+     },
+     "codec_name" => "h264",
+     "bits_per_raw_sample" => "8",
+     "nal_length_size" => "4",
+     "time_base" => "1/19001",
+     "has_b_frames" => 2,
+     "coded_height" => 1440,
+     "is_avc" => "true",
+     "level" => 51,
+     "display_aspect_ratio" => "16:9",
+     "duration" => "219.836272",
+     "duration_ts" => 4177109,
+     "sample_aspect_ratio" => "1:1",
+     "refs" => 1,
+     "start_time" => "0.000000",
+     "color_primaries" => "bt709",
+     "coded_width" => 2560,
+     "tags" => %{
+       "handler_name" => "VideoHandler",
+       "language" => "eng",
+       "vendor_id" => "[0][0][0][0]"
+     },
+     "r_frame_rate" => "19001/317",
+     "codec_tag_string" => "avc1",
+     "color_range" => "tv",
+     "index" => 0,
+     "start_pts" => 0,
+     "codec_tag" => "0x31637661",
+     "nb_frames" => "13177",
+     "color_transfer" => "bt709",
+     "avg_frame_rate" => "19001/317",
+     "color_space" => "bt709",
+     "height" => 1440,
+     "codec_type" => "video",
+     "width" => 2560,
+     "chroma_location" => "left",
+     "codec_long_name" => "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+     "closed_captions" => 0,
+     "profile" => "High"
+   },
+   %{
+     "avg_frame_rate" => "0/0",
+     "bit_rate" => "129329",
+     "bits_per_sample" => 0,
+     "channel_layout" => "stereo",
+     "channels" => 2,
+     "codec_long_name" => "AAC (Advanced Audio Coding)",
+     "codec_name" => "aac",
+     "codec_tag" => "0x6134706d",
+     "codec_tag_string" => "mp4a",
+     "codec_type" => "audio",
+     "disposition" => %{
+       "attached_pic" => 0,
+       "clean_effects" => 0,
+       "comment" => 0,
+       "default" => 1,
+       "dub" => 0,
+       "forced" => 0,
+       "hearing_impaired" => 0,
+       "karaoke" => 0,
+       "lyrics" => 0,
+       "original" => 0,
+       "timed_thumbnails" => 0,
+       "visual_impaired" => 0
+     },
+     "duration" => "219.889000",
+     "duration_ts" => 10554672,
+     "index" => 1,
+     "nb_frames" => "10308",
+     "profile" => "LC",
+     "r_frame_rate" => "0/0",
+     "sample_fmt" => "fltp",
+     "sample_rate" => "48000",
+     "start_pts" => 0,
+     "start_time" => "0.000000",
+     "tags" => %{
+       "handler_name" => "SoundHandler",
+       "language" => "eng",
+       "vendor_id" => "[0][0][0][0]"
+     },
+     "time_base" => "1/48000"
+   }
+ ]}
+```
+
+## To File
+
+```elixir
+import FFmpex
+use FFmpex.Options
+
+FFmpex.new_command()
+|> add_global_option(option_y())
+|> add_input_file("https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4")
+|> add_file_option(option_ss(70))
+|> add_output_file("./data/aespa.png")
+|> add_stream_specifier(stream_type: :video)
+|> add_stream_option(option_frames(1))
+|> execute()
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:ok, ""}
+```
+
+실행은 대부분 2초 간혹 5초 정도 걸린다.
+다행인 점은 가져오는 프레임의 갯수를 늘리더라도 (10 ~ 20개) 걸리는 시간에는 큰 차이가 없다는 점이다.
+
+```elixir
+content = File.read!("./data/aespa.png")
+Kino.Image.new(content, "image/png")
+```
+
+## To stdout
+
+```elixir
+command =
+  FFmpex.new_command()
+  |> add_input_file("https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4")
+  |> add_file_option(option_ss(65))
+  |> to_stdout()
+  |> add_stream_specifier(stream_type: :video)
+  |> add_stream_option(option_frames(1))
+  |> add_stream_option(option_c("png"))
+  |> add_file_option(option_f("image2pipe"))
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+%FFmpex.Command{
+  files: [
+    %FFmpex.File{
+      options: [
+        %FFmpex.Option{
+          argument: "image2pipe",
+          contexts: [:input, :output],
+          name: "-f",
+          require_arg: true
+        }
+      ],
+      path: "-",
+      stream_specifiers: [
+        %FFmpex.StreamSpecifier{
+          metadata_key: nil,
+          metadata_value: nil,
+          options: [
+            %FFmpex.Option{
+              argument: "png",
+              contexts: [:input, :output, :per_stream],
+              name: "-c",
+              require_arg: true
+            },
+            %FFmpex.Option{
+              argument: 1,
+              contexts: [:output, :per_stream],
+              name: "-frames",
+              require_arg: true
+            }
+          ],
+          program_id: nil,
+          stream_id: nil,
+          stream_index: nil,
+          stream_type: :video,
+          usable: false
+        }
+      ],
+      type: :output
+    },
+    %FFmpex.File{
+      options: [
+        %FFmpex.Option{argument: 65, contexts: [:input, :output], name: "-ss", require_arg: true}
+      ],
+      path: "https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4",
+      stream_specifiers: [],
+      type: :input
+    }
+  ],
+  global_options: []
+}
+```
+
+```elixir
+command |> prepare() |> then(fn {cmd, args} -> cmd <> "" <> Enum.join(args, " ") end)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+"/usr/local/bin/ffmpeg-ss 65 -i https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4 -f image2pipe -c:v png -frames:v 1 -"
+```
+
+```elixir
+command
+|> execute()
+|> then(fn
+  {:ok, image} ->
+    Kino.Image.new(image, "image/png")
+
+  {:error, err} ->
+    err
+end)
+```
+
+To File 보다 2배 이상 걸린다. (약 4~5초) 어째서 그런 것일까?
+
+* To File 의 경우 ffmpeg 이 곧장 file 로 쓴다.
+* To stdout 의 경우 ffmpeg ➡️ ffmpeg 의 stdout 출력 ➡️ ffmpex 으로 전달 (elixir) ➡️ kino 로 전송
+  * ffmpeg 의 stdout 출력 ➡️ ffmpex 으로 전달 에서 시간이 걸리는 것이 아닐까?
+  * 그런데 2배나 걸릴정도로 오래 걸릴 일인지는 궁금
+
+가져오는 프레임을 10개로 늘리면 속도는 매우 느려진다. (20초 이상이 걸린다 🤔)
+
+<!-- livebook:{"break_markdown":true} -->
+
+### 중간 결론
+
+* To File, To stdout 모두 1초 이내로 프레임을 가져오는 것은 쉽지 않아 보인다.
+
+## with jpeg
+
+png 로 했을때 꺼내온 파일의 사이즈가 무려 4Mb 에 달한다는 것을 알게됨. `jpeg` 로 변경해서 가져온다면?
+
+```elixir
+FFmpex.new_command()
+|> add_global_option(option_y())
+|> add_input_file("https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4")
+|> add_file_option(option_ss(70))
+|> add_output_file("./data/aespa.jpeg")
+|> add_stream_specifier(stream_type: :video)
+|> add_stream_option(option_frames(1))
+|> execute()
+
+content = File.read!("./data/aespa.jpeg")
+Kino.Image.new(content, "image/jpeg")
+```
+
+파일의 사이즈는 `4.2Mb` ➡️ `163Kb` 로 무려 1/25 로 줄어들었다. 속도도 매우 빠르다.
+
+```elixir
+FFmpex.new_command()
+|> add_input_file("https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4")
+|> add_file_option(option_ss(65))
+|> to_stdout()
+|> add_stream_specifier(stream_type: :video)
+|> add_stream_option(option_frames(1))
+|> add_stream_option(option_c("mjpeg"))
+|> add_file_option(option_f("image2pipe"))
+|> execute()
+|> then(fn
+  {:ok, image} ->
+    Kino.Image.new(image, "image/png")
+
+  {:error, err} ->
+    err
+end)
+```
+
+2초 내외로 파일을 만들지 않고 `Kino` 로 내려줄 수 있다!! 그렇다면 stdout 으로 여러 프레임을 가져온 경우, 어떻게 클라이언트에 내려줄 수 있을까?
+
+JPEG 이미지는 SOI 로 시작하고(`FF D8`), EOI(`FF D9`) 로 끝난다. 바이너리에서 이 부분을 찾아서 이미지를 잘라내려주면 된다.
+
+https://en.wikipedia.org/wiki/JPEG#Syntax_and_structure
+
+```elixir
+# start of image
+soi = <<255, 216>>
+
+jpeg_images =
+  FFmpex.new_command()
+  |> add_input_file("https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4")
+  |> add_file_option(option_ss(200))
+  |> to_stdout()
+  |> add_stream_specifier(stream_type: :video)
+  |> add_stream_option(option_frames(30))
+  |> add_stream_option(option_c("mjpeg"))
+  |> add_file_option(option_f("image2pipe"))
+  |> execute()
+  |> then(fn
+    {:ok, image} ->
+      image
+
+    {:error, err} ->
+      err
+  end)
+  |> :binary.split(soi, [:global, :trim_all])
+  |> Enum.map(&(soi <> &1))
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+[
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, 255, 219, 0, 67, 0, 8, 16, 16, 19, 16,
+    ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, 255, 219, 0, 67, 0, 8, 12, 12, 14,
+    ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, 255, 219, 0, 67, 0, 8, 10, 10, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, 255, 219, 0, 67, 0, 8, 14, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, 255, 219, 0, 67, 0, 8, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, 255, 219, 0, 67, 0, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, 255, 219, 0, 67, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, 255, 219, 0, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, 255, 219, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, 255, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, 0, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, 48, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, 48, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, 49, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, 46, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, 52, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, 51, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, 49, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, 46, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, 56, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, 53, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, 99, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, 118, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    97, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, 76,
+    ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, 17, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, 0, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, 254, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, 255, ...>>,
+  <<255, 216, 255, 224, 0, 16, 74, 70, 73, 70, 0, 1, 2, 0, 0, 1, 0, 1, 0, 0, ...>>
+]
+```
+
+200 초 이후의 프레임 30개를 가져오는 것도 3초 내외로 끝난다.
+
+```elixir
+max = length(jpeg_images)
+
+Kino.animate(100, 0, fn i ->
+  img = Enum.at(jpeg_images, rem(i, max)) |> Kino.Image.new("image/jpeg")
+  {:cont, img, i + 1}
+end)
+```
