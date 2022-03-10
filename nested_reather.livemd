@@ -1,0 +1,35 @@
+# nested reather
+
+## Section
+
+```elixir
+Mix.install([
+  {:reather, "~> 0.1"}
+])
+```
+
+```elixir
+defmodule Example do
+  use Reather
+
+  reather next(number) do
+    n <- number
+    %{step: step} <- Reather.ask()
+
+    result <- sum(n, step)
+    result
+  end
+
+  reather sum(n, step) do
+    n + step
+  end
+end
+```
+
+```elixir
+Example.next(10) |> Reather.run(%{step: 10})
+```
+
+```elixir
+Example.next(Algae.Either.Left.new(:NaN)) |> Reather.run()
+```

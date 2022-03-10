@@ -1,0 +1,21 @@
+# parse mp4 with membrane_mp4_plugin
+
+## install
+
+```elixir
+Mix.install([
+  {:membrane_mp4_plugin, "~> 0.13.0"}
+])
+```
+
+```elixir
+{:ok, data} = File.read("~/Downloads/bun33s_720x480.mp4" |> Path.expand())
+```
+
+```elixir
+Membrane.MP4.Container.parse(data)
+```
+
+```elixir
+{:ok, data} = File.read("~/Downloads/bun33s_720x480.h264" |> Path.expand())
+```

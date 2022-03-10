@@ -4,7 +4,8 @@
 
 ```elixir
 Mix.install([
-  {:reather, git: "https://github.com/jechol/reather.git", ref: "469477e"}
+  {:reather, "~> 0.1"},
+  {:mok, "~> 0.1"}
 ])
 ```
 
@@ -13,6 +14,7 @@ Mix.install([
 ```elixir
 defmodule Target do
   use Reather
+  require Mok
 
   defmodule Impure do
     reather read("invalid") do
@@ -25,8 +27,8 @@ defmodule Target do
   end
 
   reather read_and_multiply(filename) do
-    # `Reather.run` 으로 전달한 env 에 함수가 있으면 inject
-    input <- Impure.read(filename) |> Reather.inject()
+    env <- Reather.ask()
+    input <- Impure.read(filename) |> Mok.inject(env)
 
     multiply(input)
   end
@@ -37,20 +39,23 @@ defmodule Target do
     Right.new(input * number)
   end
 
-  def mock, do: Reather.mock(%{&Target.Impure.read/1 => Right.new(77)})
+  def mock, do: Mok.mock(%{&Target.Impure.read/1 => Right.new(77)})
 end
 ```
 
 private 함수인 `multiply` 에서 사용될 값을 `Reather.run` 을 통해 넣어줄 수 있다. (like [Algae.Reader](https://hexdocs.pm/algae/Algae.Reader.html))
 
 ```elixir
+# 99 * 10
 Target.read_and_multiply("valid") |> Reather.run(%{number: 10})
 ```
 
 `Reather.run` 에 function capture 와 리턴값을 넣어두면, 함수를 쉽게 mocking 할 수 있다. (like [definject](https://github.com/jechol/definject))
 
 ```elixir
-Target.read_and_multiply("valid") |> Reather.run(%{number: 10} |> Map.merge(Target.mock()))
+# 77 * 10
+Target.read_and_multiply("valid")
+|> Reather.run(%{number: 10} |> Map.merge(Target.mock()))
 ```
 
 ## defr vs reather
