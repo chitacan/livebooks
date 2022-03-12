@@ -39,7 +39,7 @@ web-momenti-player 의 [resource_manager.ts 파일](https://github.com/corp-mome
 defmodule Giva do
   @identifier <<170, 187, 204, 221, 221, 204, 187, 170>>
   @image_type 0
-  @giva_file "data/bf506159-3d7b-4242-a254-a24b7b313e3c@0968E872-DBCE-43E0-BF92-B127C4D6A7EC_3_50.giva"
+  @giva_file "../data/bf506159-3d7b-4242-a254-a24b7b313e3c@0968E872-DBCE-43E0-BF92-B127C4D6A7EC_3_50.giva"
 
   def read() do
     @giva_file |> File.read!()

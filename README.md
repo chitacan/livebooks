@@ -2,10 +2,10 @@
 
 https://livebook.cmmn.chitacan.io/
 
-https://livebook.dev/
-
-personal livebooks
-
 ## run
 
 open this repo in **codespace** 😎
+
+or
+
+[![Run in Livebook](https://livebook.dev/badge/v1/blue.svg)](https://livebook.dev/run?url=https%3A%2F%2Fgithub.com%2Fchitacan%2Flivebooks)

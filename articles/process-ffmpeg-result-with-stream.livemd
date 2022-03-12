@@ -58,10 +58,10 @@ ffmpeg 이 처리한 데이터를 stdout 으로 출력하도록 ffmpeg 명령어
 
 ```elixir
 Exile.stream!(~w(ffmpeg -ss 65 -i #{source} -f image2pipe -c:v mjpeg -frames:v 1 pipe:1))
-|> Stream.into(File.stream!("./data/exile_frame.jpeg"))
+|> Stream.into(File.stream!("../data/exile_frame.jpeg"))
 |> Stream.run()
 |> then(fn _ ->
-  content = File.read!("./data/exile_frame.jpeg")
+  content = File.read!("../data/exile_frame.jpeg")
   Kino.Image.new(content, "image/png")
 end)
 ```
