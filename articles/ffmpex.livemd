@@ -148,7 +148,7 @@ FFmpex.new_command()
 |> add_global_option(option_y())
 |> add_input_file("https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4")
 |> add_file_option(option_ss(70))
-|> add_output_file("../data/aespa.png")
+|> add_output_file("./data/aespa.png")
 |> add_stream_specifier(stream_type: :video)
 |> add_stream_option(option_frames(1))
 |> execute()
@@ -164,7 +164,7 @@ FFmpex.new_command()
 다행인 점은 가져오는 프레임의 갯수를 늘리더라도 (10 ~ 20개) 걸리는 시간에는 큰 차이가 없다는 점이다.
 
 ```elixir
-content = File.read!("../data/aespa.png")
+content = File.read!("./data/aespa.png")
 Kino.Image.new(content, "image/png")
 ```
 
@@ -283,12 +283,12 @@ FFmpex.new_command()
 |> add_global_option(option_y())
 |> add_input_file("https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4")
 |> add_file_option(option_ss(70))
-|> add_output_file("../data/aespa.jpeg")
+|> add_output_file("./data/aespa.jpeg")
 |> add_stream_specifier(stream_type: :video)
 |> add_stream_option(option_frames(1))
 |> execute()
 
-content = File.read!("../data/aespa.jpeg")
+content = File.read!("./data/aespa.jpeg")
 Kino.Image.new(content, "image/jpeg")
 ```
 

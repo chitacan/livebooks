@@ -15,7 +15,7 @@ Mix.install([
 ```elixir
 defmodule Giva do
   @marker <<170, 187, 204, 221, 221, 204, 187, 170>>
-  @giva_file "../data/bf506159-3d7b-4242-a254-a24b7b313e3c@0968E872-DBCE-43E0-BF92-B127C4D6A7EC_3_50.giva"
+  @giva_file "./data/bf506159-3d7b-4242-a254-a24b7b313e3c@0968E872-DBCE-43E0-BF92-B127C4D6A7EC_3_50.giva"
 
   defmodule Frame do
     defstruct [:id, :index, :image_bin]

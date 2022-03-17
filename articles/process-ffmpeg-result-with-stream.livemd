@@ -57,11 +57,13 @@ ffmpeg 이 처리한 데이터를 stdout 으로 출력하도록 ffmpeg 명령어
 여기서는 `Stream.into/3` 으로 데이터를 모두 파일로 기록하였습니다.
 
 ```elixir
-Exile.stream!(~w(ffmpeg -ss 65 -i #{source} -f image2pipe -c:v mjpeg -frames:v 1 pipe:1))
-|> Stream.into(File.stream!("../data/exile_frame.jpeg"))
+Exile.stream!(
+  ~w(ffmpeg -ss 65 -i #{source} -f image2pipe -vf scale=iw/2:ih/2 -c:v mjpeg -q:v 31 -frames:v 1 pipe:1)
+)
+|> Stream.into(File.stream!("./data/exile_frame.jpeg"))
 |> Stream.run()
 |> then(fn _ ->
-  content = File.read!("../data/exile_frame.jpeg")
+  content = File.read!("./data/exile_frame.jpeg")
   Kino.Image.new(content, "image/png")
 end)
 ```
@@ -89,7 +91,7 @@ defmodule Feature.Exile do
     frames = Keyword.get(opts, :frames)
 
     Exile.stream!(
-      ~w(ffmpeg -ss #{start} -i #{source} -f image2pipe -c:v mjpeg -frames:v #{frames} pipe:1)
+      ~w(ffmpeg -ss #{start} -i #{source} -f image2pipe -vf scale=iw/2:ih/2 -c:v mjpeg -q:v 31 -frames:v #{frames} pipe:1)
     )
     |> Stream.transform(nil, fn stdout, acc ->
       size = byte_size(stdout)
@@ -136,7 +138,7 @@ exile_frame_widget = Kino.Frame.new()
 
 영상의 시작 시점 (`:start`) 과 프레임 수 (`:frames`) 를 변경해가면서 셀을 실행해보면, 시작 시점과 프레임 수에 관계 없이 출력되는 `Time for 1st frame` 의 값이 크게 변하지 않는다는 것을 알 수 있습니다. 프레임 수를 100, 200 심지어 1,000 으로 늘리더라도 `Time for 1st frame` 는 1,500 ~ 3,000 사이를 유지합니다.
 
-`Exile` 덕분에 ffmpeg 실행이 끝날때까지 기다리지 않고, stdout 을 필요한 만큼 읽어 `Stream` 으로 처리하고 jpeg 이미지로 변환하기 때문입니다.
+`Exile` 덕분에 ffmpeg 실행이 끝날때까지 기다리지 않고, 출력된 stdout 을 필요한 만큼 `Stream` 읽고 jpeg 이미지로 변환하기 때문입니다.
 
 비슷한 로직을 ffmpex 로 구현해둔 [아래 섹션을 실행해 보면](#process-multiple-frames-(with-ffmpex)), 차이를 더 명확하게 확인할 수 있습니다.
 
@@ -169,6 +171,8 @@ defmodule Feature.Ffmpex do
     |> add_stream_specifier(stream_type: :video)
     |> add_stream_option(option_frames(frames))
     |> add_stream_option(option_c("mjpeg"))
+    |> add_stream_option(option_vf("scale=iw/2:ih/2"))
+    |> add_stream_option(option_q("31"))
     |> add_file_option(option_f("image2pipe"))
     |> execute()
     |> then(fn
