@@ -83,6 +83,52 @@ defmodule Feature.Exile do
   @soi <<255, 216>>
   @eoi <<255, 217>>
 
+  defp split(binary, acc) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[nil], acc <> binary}
+
+      [head | rest] ->
+        [tail | part] = rest |> Enum.reverse()
+        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
+        {[acc <> head <> @eoi] ++ middle, @soi <> tail}
+    end
+  end
+
+  defp split(binary, _acc, :both) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[binary], <<>>}
+
+      _ ->
+        {:binary.split(binary, @soi, [:global, :trim_all]) |> Enum.map(&(@soi <> &1)), <<>>}
+    end
+  end
+
+  defp split(binary, acc, :hd) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[nil], binary}
+
+      [head | rest] ->
+        [tail | part] = rest |> Enum.reverse()
+        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
+        {[acc <> head <> @eoi] ++ middle, @soi <> tail}
+    end
+  end
+
+  defp split(binary, acc, :tl) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[acc <> binary], <<>>}
+
+      [head | rest] ->
+        [tail | part] = rest |> Enum.reverse()
+        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
+        {[acc <> head <> @eoi] ++ middle ++ [tail], <<>>}
+    end
+  end
+
   def run(widget, opts) do
     start_time = System.monotonic_time(:millisecond)
 
@@ -93,22 +139,22 @@ defmodule Feature.Exile do
     Exile.stream!(
       ~w(ffmpeg -ss #{start} -i #{source} -f image2pipe -vf scale=iw/2:ih/2 -c:v mjpeg -q:v 31 -frames:v #{frames} pipe:1)
     )
-    |> Stream.transform(nil, fn stdout, acc ->
+    |> Stream.transform(<<>>, fn stdout, acc ->
       size = byte_size(stdout)
       {head, part, tail} = {size - 2, size - 4, size - 2}
 
       case stdout do
         <<@soi, _::binary-size(part), @eoi>> ->
-          {[stdout], <<>>}
+          split(stdout, acc, :both)
 
         <<@soi, _::binary-size(tail)>> ->
-          {[nil], stdout}
+          split(stdout, acc, :hd)
 
         <<_::binary-size(head), @eoi>> ->
-          {[acc <> stdout], <<>>}
+          split(stdout, acc, :tl)
 
         _ ->
-          {[nil], acc <> stdout}
+          split(stdout, acc)
       end
     end)
     |> Stream.reject(&is_nil/1)
