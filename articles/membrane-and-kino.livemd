@@ -1,3 +1,5 @@
+<!-- vim: syntax=Markdown -->
+
 # Membrane and Kino
 
 ## Intro

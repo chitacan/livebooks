@@ -1,3 +1,5 @@
+<!-- vim: syntax=Markdown -->
+
 # Process FFmpeg result with stream
 
 ## Introduction

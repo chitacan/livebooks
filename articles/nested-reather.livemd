@@ -1,3 +1,5 @@
+<!-- vim: syntax=Markdown -->
+
 # nested reather
 
 ## Section
