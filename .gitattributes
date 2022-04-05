@@ -1,0 +1,2 @@
+*.livemd linguist-detectable
+*.livemd linguist-language=Markdown
