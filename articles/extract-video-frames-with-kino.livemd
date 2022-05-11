@@ -1,0 +1,586 @@
+<!-- vim: syntax=Markdown -->
+
+# Extract video frames with kino
+
+```elixir
+Mix.install([
+  {:ffmpex, "~> 0.10"},
+  {:exile, git: "https://github.com/akash-akya/exile"},
+  {:kino, "~> 0.5"},
+  {:decimal, "~> 2.0"},
+  {:jason, "~> 1.3"}
+])
+
+source = "https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4"
+
+defmodule Clip do
+  defstruct start_time: 0, frame_count: 0, source: source, event: "frame:clip"
+end
+
+defmodule Frame do
+  defstruct pts: 0.0, data: ""
+end
+```
+
+## Intro
+
+[Process FFmpeg result with stream](./process-ffmpeg-result-with-stream.livemd) 에서 구현한 스트림 처리를 코드를 D3 로 구현한 [Seekbar](https://observablehq.com/d/58e590057c95f522) 와 연결시켜 보려고합니다.
+Seekbar 는 Javascript 로 구현되어 있지만, [Kino.JS](https://hexdocs.pm/kino/Kino.JS.html) Javascript API 를 사용해 Livebook 에서도 실행할 수 있습니다.
+
+## Modules
+
+비디오 파일 처리를 담당하는 `Video` 모듈을 선언합니다.
+
+* `Video.info/2`: 비디오로 부터 `duration`, `frame_rate`, `thumbnail` 정보를 추출합니다.
+* `Video.fetch_clip/2`:
+
+```elixir
+defmodule Video do
+  import FFmpex
+  import Kino.JS.Live.Context, only: [broadcast_event: 3]
+  use FFmpex.Options
+
+  @soi <<255, 216>>
+  @eoi <<255, 217>>
+
+  def fetch_clip(%Clip{} = clip, kino_context) do
+    Task.async(fn ->
+      fetch_frames(clip, kino_context)
+    end)
+  end
+
+  def info(source, sample_count \\ 20) do
+    {:ok, [video, _audio]} = FFprobe.streams(source)
+
+    {duration, _} = video |> Map.get("duration") |> Float.parse()
+    {frame_count, _} = video |> Map.get("nb_frames") |> Integer.parse()
+
+    frame_rate =
+      video
+      |> Map.get("r_frame_rate")
+      |> String.split("/")
+      |> Enum.map(fn num -> Integer.parse(num) |> elem(0) end)
+      |> Enum.reverse()
+      |> then(fn args -> Kernel.apply(Decimal, :div, args) end)
+      |> Decimal.to_float()
+
+    step = frame_rate * (frame_count - 1) / sample_count
+    timestamps = for i <- 0..sample_count, do: i * step
+    chunk_size = div(sample_count, max(System.schedulers_online(), 2)) + 1
+
+    thumbnails =
+      timestamps
+      |> Enum.chunk_every(chunk_size)
+      |> Enum.map(fn chunks ->
+        Task.async(fn ->
+          Enum.map(chunks, fn timestamp ->
+            fetch_frame(source, timestamp: timestamp, scale: 4)
+          end)
+        end)
+      end)
+      |> Task.await_many(:infinity)
+      |> Enum.flat_map(& &1)
+
+    %{duration: duration, thumbnails: thumbnails, frame_rate: frame_rate, source: source}
+  end
+
+  defp fetch_frame(source, opts) do
+    timestamp = Keyword.get(opts, :timestamp)
+    scale = Keyword.get(opts, :scale, 2)
+
+    {:ok, image} =
+      FFmpex.new_command()
+      |> add_input_file(source)
+      |> add_file_option(option_ss(timestamp))
+      |> to_stdout()
+      |> add_stream_specifier(stream_type: :video)
+      |> add_stream_option(option_frames(1))
+      |> add_stream_option(option_c("mjpeg"))
+      |> add_stream_option(option_vf("scale=iw/#{scale}:ih/#{scale}"))
+      |> add_stream_option(option_q("31"))
+      |> add_stream_option(option_threads("auto"))
+      |> add_file_option(option_f("image2pipe"))
+      |> execute()
+
+    %{ts: timestamp, dataURL: dataURL(image)}
+  end
+
+  defp fetch_frames(
+         %Clip{
+           start_time: start_time,
+           frame_count: frame_count,
+           source: source,
+           event: event = "frame:clip"
+         },
+         ctx
+       ) do
+    broadcast_event(ctx, event, %{type: "init", data: frame_count})
+
+    create_frame_stream({start_time, frame_count, source})
+    |> Stream.scan(0, fn image, index ->
+      broadcast_event(ctx, event, %{
+        type: "image",
+        data: %{index: index, image: dataURL(image)}
+      })
+
+      index + 1
+    end)
+    |> Stream.run()
+  end
+
+  defp fetch_frames(
+         %Clip{
+           start_time: start_time,
+           frame_count: frame_count,
+           source: source,
+           event: event
+         },
+         ctx
+       ) do
+    create_frame_stream({start_time, frame_count, source})
+    |> Stream.each(fn image ->
+      broadcast_event(ctx, event, %{
+        data: dataURL(image)
+      })
+    end)
+    |> Stream.run()
+  end
+
+  defp create_frame_stream({start_time, frame_count, source}) do
+    Exile.stream!(
+      ~w(ffmpeg -ss #{start_time} -i cache:#{source} -f image2pipe -vf scale=iw/2:ih/2 -c:v mjpeg -q:v 31 -frames:v #{frame_count} -threads auto pipe:1)
+    )
+    |> Stream.transform(nil, fn stdout, acc ->
+      size = byte_size(stdout)
+      {head, part, tail} = {size - 2, size - 4, size - 2}
+
+      case stdout do
+        <<@soi, _::binary-size(part), @eoi>> ->
+          split(stdout, acc, :both)
+
+        <<@soi, _::binary-size(tail)>> ->
+          split(stdout, acc, :hd)
+
+        <<_::binary-size(head), @eoi>> ->
+          split(stdout, acc, :tl)
+
+        _ ->
+          split(stdout, acc)
+      end
+    end)
+    |> Stream.reject(&is_nil/1)
+  end
+
+  defp split(binary, acc) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[nil], acc <> binary}
+
+      [head | rest] ->
+        [tail | part] = rest |> Enum.reverse()
+        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
+        {[acc <> head <> @eoi] ++ middle, @soi <> tail}
+    end
+  end
+
+  defp split(binary, _acc, :both) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[binary], <<>>}
+
+      _ ->
+        {:binary.split(binary, @soi, [:global, :trim_all]) |> Enum.map(&(@soi <> &1)), <<>>}
+    end
+  end
+
+  defp split(binary, acc, :hd) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[nil], binary}
+
+      [head | rest] ->
+        [tail | part] = rest |> Enum.reverse()
+        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
+        {[acc <> head <> @eoi] ++ middle, @soi <> tail}
+    end
+  end
+
+  defp split(binary, acc, :tl) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[acc <> binary], <<>>}
+
+      [head | rest] ->
+        [tail | part] = rest |> Enum.reverse()
+        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
+        {[acc <> head <> @eoi] ++ middle ++ [tail], <<>>}
+    end
+  end
+
+  defp dataURL(image) when is_binary(image) do
+    "data:image/jpeg;base64,#{Base.encode64(image)}"
+  end
+end
+```
+
+```elixir
+data = Video.info(source)
+```
+
+비디오로 부터 가져올 프레임 구간을 선택하고, 확인할 수 있는 Kino wdiget `Player` 모듈을 선언합니다. D3 brush 를 사용해 비디오의 구간을 선택할 수 있는 Javascript widget 코드를 모듈에 선언합니다.
+
+모듈에서는 `Kino.JS.Live.handle_event/3`, `Kino.JS.Live.Context.broadcast_event/3` 를 사용해 widget 으로 부터 전달받은 메시지들을 처리합니다.
+
+Javascript widget 에서는 `context.pushEvent`, `context.handleEvent` 를 사용해 서버로 메시지를 보내거나 받을 수 있습니다.
+
+```elixir
+defmodule Player do
+  use Kino.JS
+  use Kino.JS.Live
+
+  def new(data) do
+    Kino.JS.Live.new(__MODULE__, data)
+  end
+
+  def init(data, ctx) do
+    {:ok, assign(ctx, data)}
+  end
+
+  def handle_connect(ctx) do
+    {:ok, ctx.assigns |> Map.drop([:task]), ctx}
+  end
+
+  def handle_event("update_selection", selection, ctx) do
+    [p1, p2] = selection
+
+    frame_count =
+      ((p2 - p1) / ctx.assigns.frame_rate)
+      |> Decimal.from_float()
+      |> Decimal.max("1.0")
+      |> Decimal.round()
+      |> Decimal.to_integer()
+
+    clip = %Clip{start_time: p1, frame_count: frame_count, source: ctx.assigns.source}
+
+    if Map.has_key?(ctx.assigns, :task) do
+      Task.shutdown(ctx.assigns.task, :brutal_kill)
+    end
+
+    task = Video.fetch_clip(clip, ctx)
+
+    {:noreply, assign(ctx, selection: selection, task: task)}
+  end
+
+  def handle_event("update_position", position, ctx) do
+    clip = %Clip{
+      start_time: position,
+      frame_count: 1,
+      source: ctx.assigns.source,
+      event: "frame:position"
+    }
+
+    Video.fetch_clip(clip, ctx)
+    {:noreply, assign(ctx, position: position)}
+  end
+
+  def handle_info(_msg, ctx) do
+    {:noreply, ctx}
+  end
+
+  asset "main.js" do
+    """
+    import * as _ from 'https://cdn.skypack.dev/lodash';
+    import * as d3 from "https://cdn.skypack.dev/d3";
+    import dayjs from "https://cdn.skypack.dev/dayjs@1.11.0";
+    import duration from "https://cdn.skypack.dev/dayjs@1.11.0/plugin/duration";
+
+    dayjs.extend(duration);
+
+    export function init(ctx, {duration, thumbnails, frame_rate}) {
+      const M = { top: 10, right: 20, bottom: 20, left: 20 };
+      const W = ctx.root.clientWidth;
+      const H = 100;
+
+      const innerW = W - M.left - M.right;
+      const innerH = H - M.top - M.bottom;
+
+      const root = d3.select(ctx.root);
+
+      const svg = root.append('svg')
+        .attr('width', W)
+        .attr('height', H);
+        
+      // preview
+      let images = [];
+      let timer = null;
+      let direction = 1;
+
+      const image = new Image();
+      const tick = () => {
+        const value = +range.property('value');
+        const max = +range.property('max');
+        if ((direction > 0 && value === max) || (direction < 0 && value === 0)) {
+          direction = -direction
+        }
+        const nextValue = value + direction;
+        range.property('value', nextValue);
+        const data = images[nextValue];
+        if (images.length !== 0 && data) {
+          image.setAttribute('src', data.image);
+        }
+      };
+      const stop = () => {
+        button.text('play');
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      };
+      const play = () => {
+        button.text('pause');
+        direction = range.attr('value') === images.length - 1 ? -1 : 1;
+        timer = setInterval(tick, frame_rate * 1000);
+      };
+
+      const preview = root.append('div')
+        .attr('id', 'preview')
+        .style('margin', '10px 0 10px 20px'); 
+
+      const form = preview.append('form')
+        .style('display', 'flex')
+        .style('align-items', 'center')
+        .style('margin', '10px 0');
+      const button = form.append('button')
+        .style('width', '5em')
+        .style('margin-right', '5px')
+        .attr('disabled', true)
+        .attr('type', 'button')
+        .text('play')
+        .on('click', () => {
+          if (timer) {
+            stop();
+          } else {
+            play();
+          }
+        });
+      const range = form.append('input')
+        .attr('type', 'range')
+        .property('min', 0)
+        .property('step', 1)
+        .property('value', 0)
+        .style('width', '300px')
+        .on('input', e => {
+          const data = images[e.target.value];
+          if (images.length !== 0 && data) {
+            image.setAttribute('src', data.image);
+          }
+        });
+      const count = form.append('label')
+        .style("font-family", "menlo,consolas")
+        .style("font-size", "13px")
+        .style('margin-left', '5px'); 
+      const numer = count.append('span').text(0);
+      count.append('span').text(' / ');
+      const denom = count.append('span').text(0);
+
+      const canvas = preview.append('canvas')
+        .attr('width', 640)
+        .attr('height', 360);
+      const context = canvas.node().getContext('2d');
+      image.addEventListener('load', () => context.drawImage(image, 0, 0, 640, 360));
+
+      // events
+      const pushSelection = _.debounce(data => {
+        images = [];
+        button.attr('disabled', true);
+        stop();
+        ctx.pushEvent("update_selection", data);
+      }, 400);
+
+      const pushPosition = _.debounce(position => {
+        stop();
+        ctx.pushEvent("update_position", position);
+      }, 400);
+
+      ctx.handleEvent("frame:clip", ({type, data}) => {
+        if (type === 'init') {
+          numer.text('0');
+          denom.text(data);
+          range.attr('value', 0).attr('max', data - 1);
+        } else {
+          numer.text(data.index + 1);
+          if (data.index === 0) {
+            image.setAttribute('src', data.image);
+          } else if (data.index === +range.attr('max')) {
+            button.attr('disabled', null);
+          }
+          images.push(data);
+        }
+      });
+
+      ctx.handleEvent("frame:position", ({data}) => {
+        image.setAttribute('src', data);
+      });
+
+      // axis
+      const xThumbScale = d3
+        .scaleBand()
+        .domain(thumbnails)
+        .range([M.left, W - M.right]);
+
+      const xScale = d3
+        .scaleLinear([0, duration], [M.left, W - M.right])
+        .clamp(true);
+
+      const xAxis = (g) =>
+        g.attr("transform", `translate(0,${H - M.bottom})`)
+          .call(d3.axisBottom(xScale));
+
+      // mask
+      const mask = svg.append("defs").append("mask").attr("id", "selection-mask");
+      mask
+        .append("rect")
+        .attr("fill", "#444")
+        .attr("x", M.left)
+        .attr("y", M.top)
+        .attr("width", innerW)
+        .attr("height", innerH);
+      mask
+        .append("rect")
+        .attr("fill", "#fff")
+        .attr("class", "selection")
+        .attr("height", innerH);
+
+      // thumbnails
+      svg
+        .append("g")
+        .attr("class", "thumbnails")
+        .selectAll("image")
+        .data(thumbnails)
+        .join("image")
+        .attr("x", (d) => xThumbScale(d))
+        .attr("y", M.top)
+        .attr("width", xThumbScale.bandwidth())
+        .attr("height", H - M.bottom - M.top)
+        .attr("href", (d) => d.dataURL);
+      
+      svg.append("g").call(xAxis);
+
+      // brush
+      const brush = d3
+        .brushX()
+        .handleSize(20)
+        .extent([[M.left, M.top], [W - M.right, H - M.bottom]])
+        .on("start brush end", ({ selection, type }) => {
+          if (selection) {
+            const [x0, x1] = selection;
+            const [ix0, ix1] = selection.map(xScale.invert);
+            const [fx0, fx1] = [ix0, ix1].map((d) =>
+              dayjs.duration(d * 1000).format("mm:ss")
+            );
+
+            svg.select(".thumbnails").attr("mask", "url(#selection-mask)");
+            svg
+              .select("#selection-mask .selection")
+              .attr("x", x0)
+              .attr("width", x1 - x0);
+            timeCode
+              .selectAll(".handle")
+              .attr("visibility", type === "brush" ? "visible" : "hidden")
+              .attr("x", (d) => (d === "x0" ? x0 : x1))
+              .text((d) => (d === "x0" ? fx0 : fx1));
+
+            if (type === "end") {
+              pushSelection([ix0, ix1]);
+            }
+          } else {
+            timeCode.selectAll(".handle").attr("visibility", "hidden");
+            svg.select(".thumbnails").attr("mask", null);
+          }
+        });
+
+      const brushEl = svg.append("g");
+      brushEl
+        .call(brush)
+        .call((selection) => {
+          selection
+            .select(".selection")
+            .attr("fill-opacity", 0.1)
+            .attr("rx", 8)
+            .attr("stroke-width", 5)
+            .attr("stroke", "#f7ce45");
+          selection
+            .selectAll(".handle")
+            .attr("fill", "#f7ce45")
+            .attr("fill-opacity", 0.5);
+        })
+        .on("dblclick", function () {
+          const selection = d3.brushSelection(this) ? null : xScale.range();
+          d3.select(this).call(brush.move, selection);
+        });
+
+        // progress
+        const progress = svg
+          .append("g")
+          .append("rect")
+          .style("cursor", "pointer")
+          .attr("class", "progress")
+          .attr("fill", "#e95252")
+          .attr("rx", 2)
+          .attr("width", 5)
+          .attr("x", xScale(0))
+          .attr("y", M.top)
+          .attr("height", innerH)
+          .call(
+            d3
+              .drag()
+              .on("drag", (e) => {
+                const [min, max] = xScale.range();
+                if (e.x >= min && e.x <= max) {
+                  const time = xScale.invert(e.x);
+                  progress.attr("x", e.x);
+                  timeCode
+                    .select(".progress")
+                    .attr("visibility", "visible")
+                    .attr("x", e.x)
+                    .text(dayjs.duration(time * 1000).format("mm:ss"));
+                  pushPosition(time);
+                }
+              })
+              .on("end", (e) => {
+                timeCode.select(".progress").attr("visibility", "hidden");
+              })
+          );
+
+      // time code
+      const timeCode = svg.append("g");
+
+      timeCode
+        .append("text")
+        .attr("class", "progress")
+        .attr("y", 8)
+        .attr("text-anchor", "middle")
+        .attr("visibility", "hidden")
+        .style("font-family", "menlo,consolas")
+        .style("font-size", "11px");
+
+      timeCode
+        .selectAll("text.handle")
+        .data(["x0", "x1"])
+        .enter()
+        .append("text")
+        .attr("class", "handle")
+        .attr("y", 8)
+        .attr("text-anchor", "middle")
+        .attr("visibility", "hidden")
+        .style("font-family", "menlo,consolas")
+        .style("font-size", "11px");
+    }
+    """
+  end
+end
+```
+
+```elixir
+selection_widget = Player.new(data)
+```

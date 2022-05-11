@@ -1,0 +1,106 @@
+# Playing with Functors
+
+## Setup
+
+```elixir
+Mix.install([
+  {:witchcraft, "~> 1.0"},
+  {:algae, "~> 1.2"}
+])
+```
+
+```elixir
+use Witchcraft
+alias Algae.Either.{Right, Left}
+```
+
+```mermaid
+graph TD
+  Functor -.-> Traversable
+  Functor -.-> Apply
+  Functor -.-> Bitfunctor
+  Apply -.-> Applicative
+  Apply -.-> Chain
+  Applicative -.-> Monad
+  Chain -.-> Monad
+```
+
+## Functor
+
+```elixir
+%Right{right: 100}
+~> fn y -> y * 2 end
+```
+
+```elixir
+%Right{right: [100, 200, 300]}
+~> (&List.first/1)
+```
+
+```elixir
+%Right{right: [100, 200, 300]}
+|> map(&List.first/1)
+```
+
+```elixir
+%Right{right: [100, 200, 300]}
+|> map(&Enum.map(&1, fn x -> x + 1 end))
+```
+
+## Apply
+
+```elixir
+%Right{right: 10} ~>> %Right{right: fn x -> x * 2 end}
+```
+
+```elixir
+%Right{right: 10} |> convey(%Right{right: fn x -> x * 2 end})
+```
+
+## lift vs map
+
+```elixir
+%Right{right: 1000}
+|> lift(fn x, y, z -> x + y + z end)
+~> fn x -> x.(1) end
+~> fn x -> x.(1) end
+```
+
+```elixir
+[10, 20, 30]
+|> lift(fn x, y, z -> x + y + z end)
+|> Enum.map(fn x -> x.(1) end)
+|> Enum.map(fn x -> x.(1) end)
+```
+
+```elixir
+%Right{right: 1000}
+|> map(fn x, y -> x + y end)
+```
+
+## Traverse
+
+```elixir
+%Right{right: [100, 200, 300]}
+|> traverse(fn x -> [x] end)
+```
+
+```elixir
+%Right{right: [100, 200, 300]}
+|> traverse(fn x -> x end)
+|> map(fn x ->
+  x ~> fn y -> y + 1 end
+end)
+```
+
+```elixir
+[%Right{right: 100}, %Right{right: 200}, %Right{right: 300}]
+|> traverse(fn x -> x end)
+~> (&List.first/1)
+```
+
+```elixir
+[%Right{right: 100}, %Right{right: 200}, %Right{right: 300}]
+|> traverse(fn x -> x end) >>>
+  fn x -> Enum.map(x, fn x -> x * 2 end) end
+```
