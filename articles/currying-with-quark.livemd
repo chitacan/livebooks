@@ -1,0 +1,45 @@
+# currying with quark
+
+```elixir
+Mix.install([
+  {:quark, "~> 2.3"}
+])
+```
+
+## Section
+
+```elixir
+import Quark.Curry
+```
+
+```elixir
+defmodule Session do
+  def create(a, b, c) do
+    "#{a} #{b} #{c}"
+  end
+
+  def apply_value(func, value) do
+    func.(value)
+  end
+end
+```
+
+```elixir
+Session.create(1, 2, 3)
+```
+
+```elixir
+(&Session.create/3)
+|> curry
+|> then(& &1.(1))
+|> then(& &1.(1))
+|> then(& &1.(1))
+```
+
+```elixir
+(&Session.create/3)
+|> curry
+|> Session.apply_value(1)
+|> Session.apply_value(2)
+|> Session.apply_value(3)
+```

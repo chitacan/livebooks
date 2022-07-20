@@ -1,5 +1,3 @@
-<!-- vim: syntax=Markdown -->
-
 # Extract video frames with kino
 
 ```elixir
@@ -50,7 +48,10 @@ defmodule Video do
   end
 
   def info(source, sample_count \\ 20) do
-    {:ok, [video, _audio]} = FFprobe.streams(source)
+    {:ok, streams} = FFprobe.streams(source)
+
+    video =
+      streams |> Enum.filter(fn %{"codec_type" => type} -> type === "video" end) |> List.first()
 
     {duration, _} = video |> Map.get("duration") |> Float.parse()
     {frame_count, _} = video |> Map.get("nb_frames") |> Integer.parse()

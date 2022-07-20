@@ -1,5 +1,3 @@
-<!-- vim: syntax=Markdown -->
-
 # parse mp4 with membrane_mp4_plugin
 
 ## install

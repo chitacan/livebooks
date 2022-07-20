@@ -1,5 +1,3 @@
-<!-- vim: syntax=Markdown -->
-
 # Graphql Agent for momenti_web
 
 ## Target Node

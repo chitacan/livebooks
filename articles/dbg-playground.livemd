@@ -1,5 +1,3 @@
-<!-- vim: syntax=Markdown -->
-
 # dbg playground
 
 ## Intro

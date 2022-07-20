@@ -1,0 +1,99 @@
+# control livebook
+
+## why
+
+attach node 를 마음대로 할 수 있을까?
+
+```elixir
+defmodule Tool do
+  use GenServer
+
+  def start() do
+    GenServer.start(__MODULE__, [], name: __MODULE__)
+  end
+
+  def stop() do
+    GenServer.stop(__MODULE__)
+  end
+
+  def init(_opts) do
+    {:ok, %{}}
+  end
+
+  def list_nodes() do
+    GenServer.call(__MODULE__, :list_nodes)
+  end
+
+  def attach_node(node, session_id) do
+    GenServer.call(__MODULE__, {:attach_node, node, session_id})
+  end
+
+  defp list_lv do
+    Process.whereis(:ranch_server)
+    |> :sys.get_state()
+    |> elem(1)
+    |> Enum.find(fn
+      {_, {:conns_sup, _}} -> true
+      _ -> false
+    end)
+    |> elem(0)
+    |> elem(1)
+    |> Process.info(:dictionary)
+    |> elem(1)
+    |> Enum.filter(fn
+      {_, :removed} -> true
+      _ -> false
+    end)
+    |> Enum.map(&(&1 |> elem(0) |> :sys.get_state() |> elem(1)))
+    |> Enum.map(fn [_ | {%{channels: c}, _}] -> c end)
+    |> Enum.filter(fn
+      %{"phoenix:live_reload" => _} -> false
+      _ -> true
+    end)
+    |> Enum.reduce(%{}, &Map.merge/2)
+    |> Enum.map(fn {key, val} ->
+      channel_id = String.replace(key, "lv:", "")
+      Tuple.insert_at(val, 0, channel_id)
+      %{id: channel_id, pid: elem(val, 0), ref: elem(val, 1), state: elem(val, 2)}
+    end)
+  end
+
+  defp list_sockets do
+    list_lv()
+    |> Enum.map(fn %{pid: pid} -> :sys.get_state(pid) end)
+    |> Enum.map(fn state -> state.socket end)
+  end
+
+  def handle_call(:list_nodes, _from, state) do
+    nodes = Node.list(:hidden) |> Enum.map(&Atom.to_string/1)
+    {:reply, nodes, state}
+  end
+
+  def handle_call({:attach_node, node, session_id}, _from, state) do
+    socket = list_sockets() |> Enum.find(fn socket -> socket.assigns.session.id == session_id end)
+
+    reply =
+      case socket do
+        nil ->
+          nil
+
+        socket ->
+          cookie = Node.get_cookie() |> Atom.to_string()
+
+          LivebookWeb.SessionLive.AttachedLive.handle_event(
+            "init",
+            %{
+              "data" => %{"name" => node, "cookie" => cookie}
+            },
+            socket
+          )
+      end
+
+    {:reply, reply, state}
+  end
+end
+```
+
+```elixir
+Node.list(:hidden)
+```

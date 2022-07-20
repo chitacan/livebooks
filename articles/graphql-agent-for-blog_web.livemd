@@ -1,5 +1,3 @@
-<!-- vim: syntax=Markdown -->
-
 # Graphql Agent for blog_web
 
 ## Target Node

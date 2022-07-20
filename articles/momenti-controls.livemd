@@ -1,12 +1,10 @@
-<!-- vim: syntax=Markdown -->
-
 # momenti controls
 
 ## setup
 
 `Momenti.Control` 에 있는 모듈들 & [Witchcraft](https://hexdocs.pm/witchcraft/1.0.3/readme.html) 기능들을 학습해보기 위한 노트북
 
-[momenti-elixir](https://github.dev/corp-momenti/momenti-elixir) `apps/momenti` 앱을 다음과 같이 실행합니다.
+[momenti-elixir](https://github.dev/corp-momenti/momenti-elixir) `apps/momenti_core` 앱을 다음과 같이 실행합니다.
 
 ```
 $ iex --name momenti@cmmn.chitacan.io --cookie hello -S mix

@@ -1,5 +1,3 @@
-<!-- vim: syntax=Markdown -->
-
 # 2021-11-22 Elixir Team Weekly Recap
 
 ## setup
