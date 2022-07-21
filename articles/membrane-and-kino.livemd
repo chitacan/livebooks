@@ -1,24 +1,33 @@
 # Membrane and Kino
 
-## Intro
-
-`membrane_h264_ffmpeg_plugin`, `membrane_hackney_plugin` 을 사용해 h264 포맷의 파일을 디코딩하는 [membrane pipeline](https://github.com/membraneframework/guide/blob/master/guide/concepts/pipelines.md) 을 만듭니다.
-pipeline 의 sink 는 디코딩된 I420 포맷의 프레임을 jpeg 로 변경해서 [kino frame](https://hexdocs.pm/kino/Kino.Frame.html) 으로 렌더링합니다.
-
-## Setup
-
-`turbojpeg` 가 사용하는 `unifex`, `bundlex` 의존성의 버전과 `membrane_h264_ffmpeg_plugin` 이 사용하는 버전이 달라 `turbojpeg`, `membrane_h264_ffmpeg_plugin` 를 함께 설치하는 것이 불가능합니다.
-
-낮은 버전을 사용하는 `turbojpeg` 의 `unifex`, `bundlex` 의 버전을 올리고 약간의 패치를 추가했습니다.
-
 ```elixir
 Mix.install([
   {:kino, "~> 0.5.2"},
   {:membrane_h264_ffmpeg_plugin, "~> 0.15.0"},
   {:membrane_hackney_plugin, "~> 0.6.0"},
-  {:turbojpeg, path: "/Users/chitacan/git/elixir-turbojpeg/update-deps"}
+  {:turbojpeg, github: "chitacan/elixir-turbojpeg", branch: "update-deps"}
 ])
 ```
+
+## Intro
+
+`membrane_h264_ffmpeg_plugin`, `membrane_hackney_plugin` 을 사용해 h264 포맷의 파일을 디코딩하는 [membrane pipeline](https://github.com/membraneframework/guide/blob/master/guide/concepts/pipelines.md) 을 만듭니다.
+pipeline 의 sink 는 디코딩된 I420 포맷의 프레임을 jpeg 로 변경해서 [kino frame](https://hexdocs.pm/kino/Kino.Frame.html) 으로 렌더링합니다.
+
+```mermaid
+graph LR;
+  a[("Video")] -->|http| b["Source<div>(Hackney)</div>"];
+  b --> c["FFmpeg Parser"];
+  c --> d["FFmpeg Decoder"];
+  d --> e["Sink<div>(I420 ➡️ jpeg)</div>"];
+  e -->|Kino| f(("Livebook<div>Kino.Frame</div>"));
+```
+
+## Setup
+
+`turbojpeg` 가 사용하는 `unifex`, `bundlex` 의존성의 버전과 `membrane_h264_ffmpeg_plugin` 이 사용하는 버전이 달라 `turbojpeg`, `membrane_h264_ffmpeg_plugin` 를 함께 설치하는 것이 불가능합니다.
+
+낮은 버전을 사용하는 `turbojpeg` 의 `unifex`, `bundlex` 의 버전을 올리고 [약간의 패치를 추가했습니다.](https://github.com/chitacan/elixir-turbojpeg/tree/update-deps)
 
 ## Result
 
@@ -28,7 +37,7 @@ jpeg 로 변환된 프레임을 렌더링할 Kino Frame 을 선언합니다.
 frame_widget = Kino.Frame.new()
 ```
 
-pipeline 을 컨트롤할 UI 를 선언합니다. `Play == true` 상태가 되면 새로운 pipeline 프로세스를 생성하고 재생을 요청합니다.
+pipeline 을 컨트롤할 UI 를 선언합니다. `Play == true` 상태가 되면 새로운 pipeline 프로세스를 생성하고 재생을 요청합니다. 재생이 시작되면, 직전 셀에서 선언한 `frame_widget` 에 비디오 프레임이 표시됩니다.
 `Play == false` 가 되면 pipeline 을 종료합니다.
 
 ```elixir
@@ -121,15 +130,6 @@ end
 membrane pipeline 을 선언합니다.
 
 [/static/samples/big-buck-bunny/bun33s_720x480.h264](https://tutorials.membraneframework.org/static/samples/big-buck-bunny/bun33s_720x480.h264) 경로의 비디오 파일을 Hackney 모듈로 가져와 I420 포맷으로 디코딩합니다. 디코딩 된 프레임은 `turbojpeg` 를 사용해 jpeg 로 변환하고 25fps 의 속도로 Livebook 에 선언된 Kino Frame 을 업데이트 합니다.
-
-```mermaid
-graph LR;
-  a[("Video")] -->|http| b["Source<div>(Hackney)</div>"];
-  b --> c["FFmpeg Parser"];
-  c --> d["FFmpeg Decoder"];
-  d --> e["Sink<div>(I420 ➡️ jpeg)</div>"];
-  e -->|Kino| f(("Livebook"));
-```
 
 ```elixir
 defmodule Pipeline do
