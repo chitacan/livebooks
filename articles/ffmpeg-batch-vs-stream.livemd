@@ -1,0 +1,170 @@
+# FFmpeg batch vs stream
+
+```elixir
+Mix.install([
+  {:ffmpex, "~> 0.10"},
+  {:exile, git: "https://github.com/akash-akya/exile"},
+  {:kino, "~> 0.5"},
+  {:benchee, "~> 1.1"}
+])
+
+source = "https://storage.googleapis.com/momenti-staging-public-2/content/aespa.mp4"
+
+Logger.configure(level: :info)
+```
+
+## Introduction
+
+ffmpeg 실행결과를 stdout 으로 처리하는 방법은 2가지가 있다.
+
+* 모든 결과를 한번에 stdout 으로 출력하고, 파싱한다. (`batch`)
+* 실행중 일부 결과를 stdout 으로 출력하고, 파싱한다. 실행이 끝날때까지 반복한다. (`stream`)
+
+직관적으로 추측해보면 `batch` 방식은 stdout 으로 출력된 모든 결과를 한번에 처리해야 하기 때문에, 메모리를 많이 사용하게되는데, 정확하게 얼마나 더 사용하게 되는 것일까? [benchee](https://github.com/bencheeorg/benchee) 로 측정해보자.
+
+```elixir
+defmodule FFmpeg do
+  import FFmpex
+  use FFmpex.Options
+
+  def run_stdout({start_time, frame_count, source}) do
+    FFmpex.new_command()
+    |> add_input_file(source)
+    |> add_file_option(option_ss(start_time))
+    |> to_stdout()
+    |> add_stream_specifier(stream_type: :video)
+    |> add_stream_option(option_frames(frame_count))
+    |> add_stream_option(option_c("mjpeg"))
+    |> add_stream_option(option_q("31"))
+    |> add_file_option(option_f("image2pipe"))
+    |> add_file_option(option_vf("scale=iw/2:ih/2"))
+    |> execute()
+  end
+
+  def run_stream({start_time, frame_count, source}) do
+    Exile.stream!(
+      ~w(ffmpeg -ss #{start_time} -i #{source} -f image2pipe -vf scale=iw/2:ih/2 -c:v mjpeg -q:v 31 -frames:v #{frame_count} -threads auto pipe:1)
+    )
+  end
+end
+```
+
+```elixir
+defmodule FFmpeg.Stream do
+  @soi <<255, 216>>
+  @eoi <<255, 217>>
+
+  def run(opt) do
+    opt
+    |> FFmpeg.run_stream()
+    |> split()
+    |> Enum.to_list()
+  end
+
+  defp split(stream) do
+    stream
+    |> Stream.transform(nil, fn stdout, acc ->
+      size = byte_size(stdout)
+      {head, part, tail} = {size - 2, size - 4, size - 2}
+
+      case stdout do
+        <<@soi, _::binary-size(part), @eoi>> ->
+          split(stdout, acc, :both)
+
+        <<@soi, _::binary-size(tail)>> ->
+          split(stdout, acc, :hd)
+
+        <<_::binary-size(head), @eoi>> ->
+          split(stdout, acc, :tl)
+
+        _ ->
+          split(stdout, acc)
+      end
+    end)
+    |> Stream.reject(&is_nil/1)
+  end
+
+  defp split(binary, acc) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[nil], acc <> binary}
+
+      [head | rest] ->
+        [tail | part] = rest |> Enum.reverse()
+        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
+        {[acc <> head <> @eoi] ++ middle, @soi <> tail}
+    end
+  end
+
+  defp split(binary, _acc, :both) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[binary], <<>>}
+
+      _ ->
+        {:binary.split(binary, @soi, [:global, :trim_all]) |> Enum.map(&(@soi <> &1)), <<>>}
+    end
+  end
+
+  defp split(binary, acc, :hd) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[nil], binary}
+
+      [head | rest] ->
+        [tail | part] = rest |> Enum.reverse()
+        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
+        {[acc <> head <> @eoi] ++ middle, @soi <> tail}
+    end
+  end
+
+  defp split(binary, acc, :tl) do
+    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
+      [_] ->
+        {[acc <> binary], <<>>}
+
+      [head | rest] ->
+        [tail | part] = rest |> Enum.reverse()
+        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
+        {[acc <> head <> @eoi] ++ middle ++ [tail], <<>>}
+    end
+  end
+end
+```
+
+```elixir
+defmodule FFmpeg.Batch do
+  @soi <<255, 216>>
+
+  def run(opt) do
+    opt
+    |> FFmpeg.run_stdout()
+    |> then(fn
+      {:ok, image} ->
+        image
+
+      {:error, err} ->
+        err
+    end)
+    |> :binary.split(@soi, [:global, :trim_all])
+    |> Enum.map(&(@soi <> &1))
+  end
+end
+```
+
+```elixir
+Benchee.run(
+  %{
+    "Batch" => fn input -> FFmpeg.Batch.run(input) end,
+    "Stream" => fn input -> FFmpeg.Stream.run(input) end
+  },
+  time: 10,
+  memory_time: 1,
+  reduction_time: 1,
+  inputs: %{
+    "0.5s_clip" => {10, 30, source},
+    "10s_clip" => {20, 10 * 60, source},
+    "30s_clip" => {30, 30 * 60, source}
+  }
+)
+```
