@@ -129,7 +129,7 @@ end
 
 membrane pipeline 을 선언합니다.
 
-[/static/samples/big-buck-bunny/bun33s_720x480.h264](https://tutorials.membraneframework.org/static/samples/big-buck-bunny/bun33s_720x480.h264) 경로의 비디오 파일을 Hackney 모듈로 가져와 I420 포맷으로 디코딩합니다. 디코딩 된 프레임은 `turbojpeg` 를 사용해 jpeg 로 변환하고 25fps 의 속도로 Livebook 에 선언된 Kino Frame 을 업데이트 합니다.
+https://raw.githubusercontent.com/membraneframework/static/gh-pages/samples/big-buck-bunny/bun33s_720x480.h264 경로의 비디오 파일을 Hackney 모듈로 가져와 I420 포맷으로 디코딩합니다. 디코딩 된 프레임은 `turbojpeg` 를 사용해 jpeg 로 변환하고 25fps 의 속도로 Livebook 에 선언된 Kino Frame 을 업데이트 합니다.
 
 ```elixir
 defmodule Pipeline do
@@ -142,7 +142,7 @@ defmodule Pipeline do
     children = [
       hackney: %Hackney.Source{
         location:
-          "https://tutorials.membraneframework.org/static/samples/big-buck-bunny/bun33s_720x480.h264"
+          "https://raw.githubusercontent.com/membraneframework/static/gh-pages/samples/big-buck-bunny/bun33s_720x480.h264"
       },
       parser: %FFmpeg.Parser{framerate: {25, 1}},
       decoder: FFmpeg.Decoder,
