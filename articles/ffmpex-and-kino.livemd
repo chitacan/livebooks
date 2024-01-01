@@ -47,6 +47,8 @@ defmodule Frames do
     |> to_stdout()
     |> add_stream_specifier(stream_type: :video)
     |> add_stream_option(option_frames(frames))
+    |> add_stream_option(option_vf("scale=iw/2:ih/2"))
+    |> add_stream_option(option_q("31"))
     |> add_stream_option(option_c("mjpeg"))
     |> add_file_option(option_f("image2pipe"))
     |> execute()

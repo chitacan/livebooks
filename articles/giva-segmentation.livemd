@@ -1,0 +1,62 @@
+# giva segmentation
+
+## Section
+
+```elixir
+defmodule Frame do
+  defstruct [:id, :index, :image_bin]
+end
+```
+
+```elixir
+list = 0..7 |> Enum.map(fn i -> %Frame{index: i} end)
+```
+
+```elixir
+segment_count = 10
+```
+
+```elixir
+list |> Enum.count()
+```
+
+```elixir
+segment_size = Enum.count(list) |> div(segment_count) |> max(1)
+
+rest =
+  if Enum.count(list) > segment_count do
+    Enum.count(list) |> rem(segment_count)
+  else
+    0
+  end
+```
+
+```elixir
+{segment_size, rest}
+```
+
+```elixir
+sizes =
+  1..segment_count
+  |> Enum.with_index()
+  |> Enum.map(fn {_, index} ->
+    if index < rest do
+      segment_size + 1
+    else
+      segment_size
+    end
+  end)
+  |> Enum.reduce({[], list}, fn
+    size, {result, target} ->
+      case Enum.split(target, size) do
+        {chunk, []} ->
+          Enum.reverse([chunk | result])
+
+        {chunk, rest} ->
+          {[chunk | result], rest}
+      end
+
+    _size, result ->
+      result
+  end)
+```

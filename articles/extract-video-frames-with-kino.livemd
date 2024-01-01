@@ -151,70 +151,20 @@ defmodule Video do
     Exile.stream!(
       ~w(ffmpeg -ss #{start_time} -i cache:#{source} -f image2pipe -vf scale=iw/2:ih/2 -c:v mjpeg -q:v 31 -frames:v #{frame_count} -threads auto pipe:1)
     )
-    |> Stream.transform(nil, fn stdout, acc ->
-      size = byte_size(stdout)
-      {head, part, tail} = {size - 2, size - 4, size - 2}
-
-      case stdout do
-        <<@soi, _::binary-size(part), @eoi>> ->
-          split(stdout, acc, :both)
-
-        <<@soi, _::binary-size(tail)>> ->
-          split(stdout, acc, :hd)
-
-        <<_::binary-size(head), @eoi>> ->
-          split(stdout, acc, :tl)
-
-        _ ->
-          split(stdout, acc)
-      end
-    end)
+    |> Stream.transform(<<>>, &split/2)
     |> Stream.reject(&is_nil/1)
   end
 
-  defp split(binary, acc) do
-    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
-      [_] ->
-        {[nil], acc <> binary}
+  defp split(part, acc) do
+    case :binary.match(part, @eoi) do
+      :nomatch ->
+        {[], acc <> part}
 
-      [head | rest] ->
-        [tail | part] = rest |> Enum.reverse()
-        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
-        {[acc <> head <> @eoi] ++ middle, @soi <> tail}
-    end
-  end
-
-  defp split(binary, _acc, :both) do
-    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
-      [_] ->
-        {[binary], <<>>}
-
-      _ ->
-        {:binary.split(binary, @soi, [:global, :trim_all]) |> Enum.map(&(@soi <> &1)), <<>>}
-    end
-  end
-
-  defp split(binary, acc, :hd) do
-    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
-      [_] ->
-        {[nil], binary}
-
-      [head | rest] ->
-        [tail | part] = rest |> Enum.reverse()
-        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
-        {[acc <> head <> @eoi] ++ middle, @soi <> tail}
-    end
-  end
-
-  defp split(binary, acc, :tl) do
-    case :binary.split(binary, <<@eoi, @soi>>, [:global, :trim_all]) do
-      [_] ->
-        {[acc <> binary], <<>>}
-
-      [head | rest] ->
-        [tail | part] = rest |> Enum.reverse()
-        middle = part |> Enum.reverse() |> Enum.map(&(@soi <> &1 <> @eoi))
-        {[acc <> head <> @eoi] ++ middle ++ [tail], <<>>}
+      {pos, len} ->
+        pos = pos + len
+        <<part::binary-size(pos), rest::binary>> = part
+        {enum, new_acc} = split(rest, <<>>)
+        {[acc <> part | enum], new_acc}
     end
   end
 
